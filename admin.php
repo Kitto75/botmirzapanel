@@ -2,15 +2,32 @@
 
 #----------------[  admin section  ]------------------#
 $textadmin = ["panel", "/panel", $textbotlang['Admin']['commendadminmanagment'], $textbotlang['Admin']['commendadmin']];
-if (!in_array($from_id, $admin_ids))
+if ($text == '/admin_debug') {
+    $adminTableIds = array_map('strval', select("admin", "id_admin", null, null, "FETCH_COLUMN"));
+    $debugText = "admin_debug\nfrom_id: " . (string)$from_id
+        . "\nadminnumber: " . (string)$adminnumber
+        . "\nadmin_table_ids: " . implode(',', $adminTableIds)
+        . "\nisAdminUser: " . (isAdminUser($from_id) ? 'true' : 'false')
+        . "\nstep: " . (string)$user['step']
+        . "\ntext: " . (string)$text;
+    sendmessage($from_id, $debugText, null, 'HTML');
     return;
-if (in_array($text, $textadmin) || $datain == "PANEL") {
+}
+
+if (!isAdminUser($from_id)) {
+    return;
+}
+$admin_ids = array_map("strval", $admin_ids);
+if (in_array($text, $textadmin) || in_array(mb_strtolower(trim((string)$text)), ["ادمین","پنل مدیریت","panel","/panel"]) || $datain == "PANEL") {
     if (!(function_exists('shell_exec') && is_callable('shell_exec'))) {
         $cronCommandsendmessage = "*/1 * * * * curl https://$domainhosts/cron/sendmessage.php";
         sendmessage($from_id, sprintf($textbotlang['Admin']['cron']['active_manual_sendmessage'], $cronCommandsendmessage), null, 'HTML');
     }
     $text_admin = sprintf($textbotlang['Admin']['login-admin'], $version);
     sendmessage($from_id, $text_admin, $keyboardadmin, 'HTML');
+    step('admin_home', $from_id);
+    return;
+}
 if ($text == $textbotlang['Admin']['Back-Adminment'] || $datain == "back_admin") {
     if ($datain == "back_admin")
         deletemessage($from_id, $message_id);
@@ -57,7 +74,7 @@ if ($text == $textbotlang['Admin']['Removeedadmin']) {
         sendmessage($from_id, $textbotlang['Admin']['manageadmin']['InfoAdd'], null, 'HTML');
         return;
     }
-    if (!is_numeric($text) || !in_array($text, $admin_ids))
+    if (!is_numeric($text) || !isAdminUser($text))
         return;
     sendmessage($from_id, $textbotlang['Admin']['manageadmin']['removedadmin'], $keyboardadmin, 'HTML');
     $stmt = $pdo->prepare("DELETE FROM admin WHERE id_admin = ?");
@@ -2624,5 +2641,4 @@ if ($user['step'] == 'reseller_add_product_category') {
 
     sendmessage($from_id, sprintf($textbotlang['Admin']['reseller']['addproduct_success'], $data['reseller_user_id'], $codeProduct, $data['name_product'], $data['price_product'], $data['Volume_constraint'], $data['Location'], $data['Service_time'], $categoryValue), $resellerkeyboard, 'HTML');
     step('home', $from_id);
-}
 }
