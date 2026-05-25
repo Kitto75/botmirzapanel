@@ -628,3 +628,49 @@ try {
     file_put_contents('error_log',$e->getMessage());
 }
 $connect->query("ALTER TABLE `user` CHANGE `Processing_value` `Processing_value` TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL;");
+//-----------------------------------------------------------------
+try {
+    $result = $connect->query("SHOW TABLES LIKE 'resellers'");
+    if ($result->num_rows == 0) {
+        $connect->query("CREATE TABLE resellers (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id VARCHAR(100) NOT NULL UNIQUE,
+            status VARCHAR(20) NOT NULL DEFAULT 'active',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin");
+    }
+} catch (Exception $e) { file_put_contents("$randomString.txt",$e->getMessage()); }
+
+try {
+    $result = $connect->query("SHOW TABLES LIKE 'reseller_products'");
+    if ($result->num_rows == 0) {
+        $connect->query("CREATE TABLE reseller_products (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            reseller_user_id VARCHAR(100) NOT NULL,
+            code_product VARCHAR(200) NOT NULL,
+            name_product VARCHAR(500) NOT NULL,
+            price_product BIGINT NOT NULL DEFAULT 0,
+            Volume_constraint VARCHAR(200) NOT NULL DEFAULT '0',
+            Location VARCHAR(200) NOT NULL DEFAULT '/all',
+            Service_time VARCHAR(200) NOT NULL DEFAULT '0',
+            Category VARCHAR(200) NOT NULL DEFAULT '0',
+            status VARCHAR(20) NOT NULL DEFAULT 'active',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_reseller_user_id (reseller_user_id),
+            INDEX idx_reseller_code_product (code_product)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin");
+    }
+} catch (Exception $e) { file_put_contents("$randomString.txt",$e->getMessage()); }
+
+try {
+    $result = $connect->query("SHOW TABLES LIKE 'reseller_settings'");
+    if ($result->num_rows == 0) {
+        $connect->query("CREATE TABLE reseller_settings (
+            reseller_user_id VARCHAR(100) PRIMARY KEY,
+            extra_volume_price BIGINT NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin");
+    } else {
+        addFieldToTable('reseller_settings', 'extra_volume_price', '0', 'BIGINT');
+    }
+} catch (Exception $e) { file_put_contents("$randomString.txt",$e->getMessage()); }

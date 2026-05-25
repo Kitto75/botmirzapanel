@@ -183,6 +183,7 @@ $shopkeyboard = json_encode([
         [['text' => $textbotlang['Admin']['managepanel']['keyboardpanel']['setvolume']]],
         [['text' => $textbotlang['Admin']['Discount']['titlebtn']], ['text' => $textbotlang['Admin']['Discount']['titlebtnremove']]],
         [['text' => $textbotlang['Admin']['Discountsell']['create']], ['text' => $textbotlang['Admin']['Discountsell']['remove']]],
+        [['text' => $textbotlang['Admin']['reseller']['manage']]],
         [['text' => $textbotlang['Admin']['Back-Adminment']]]
     ],
     'resize_keyboard' => true
@@ -620,11 +621,8 @@ function KeyboardCategorybuy($callback_data, $location)
     $stmt->execute();
     $list_category = ['inline_keyboard' => [],];
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        $stmts = $pdo->prepare("SELECT * FROM product WHERE (Location = :location OR Location = '/all') AND category = :category");
-        $stmts->bindParam(':location', $location, PDO::PARAM_STR);
-        $stmts->bindParam(':category', $row['id'], PDO::PARAM_STR);
-        $stmts->execute();
-        if ($stmts->rowCount() == 0)
+        $products = getAvailableProductsForUser($GLOBALS['from_id'] ?? 0, $location, $row['id']);
+        if (count($products) == 0)
             continue;
         $list_category['inline_keyboard'][] = [['text' => $row['remark'], 'callback_data' => "categorylist_" . $row['id']]];
     }
@@ -636,15 +634,9 @@ function KeyboardCategorybuy($callback_data, $location)
 function KeyboardProduct($location, $backdata, $MethodUsername, $categoryid = null)
 {
     global $pdo, $textbotlang;
-    $query = "SELECT * FROM product WHERE (Location = :location OR Location = '/all') ";
-    if ($categoryid != null) {
-        $query .= "AND category = '$categoryid'";
-    }
-    $stmt = $pdo->prepare($query);
-    $stmt->bindParam(':location', $location, PDO::PARAM_STR);
-    $stmt->execute();
     $product = ['inline_keyboard' => []];
-    while ($result = $stmt->fetch(PDO::FETCH_ASSOC)) {
+    $rows = getAvailableProductsForUser($GLOBALS['from_id'] ?? 0, $location, $categoryid);
+    foreach ($rows as $result) {
         if ($MethodUsername == $textbotlang['users']['customusername']) {
             $product['inline_keyboard'][] = [
                 ['text' => $result['name_product'], 'callback_data' => "prodcutservices_" . $result['code_product']]
@@ -661,3 +653,4 @@ function KeyboardProduct($location, $backdata, $MethodUsername, $categoryid = nu
 
     return json_encode($product);
 }
+$resellerkeyboard = json_encode(['keyboard' => [[[ 'text' => $textbotlang['Admin']['reseller']['add']],[ 'text' => $textbotlang['Admin']['reseller']['remove']]],[[ 'text' => $textbotlang['Admin']['reseller']['list']]],[[ 'text' => $textbotlang['Admin']['reseller']['setextra']]],[[ 'text' => $textbotlang['Admin']['Back-Adminment']]]], 'resize_keyboard' => true]);

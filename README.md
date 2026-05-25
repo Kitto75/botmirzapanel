@@ -191,3 +191,49 @@ Your support ensures continued updates and improvements for this project. Thank 
 ### Contributors
 
 ![Contributors](https://contrib.rocks/image?repo=mahdiMGF2/botmirzapanel)
+
+## ویژگی جدید: مدیریت ریسلرها (تعیین Reseller)
+- در منوی ادمین، بخش **مدیریت ریسلرها** اضافه شده است.
+- هر ریسلر می‌تواند محصولات خصوصی خودش را با قیمت/حجم/مدت/لوکیشن/دسته‌بندی اختصاصی داشته باشد.
+- قیمت حجم اضافه (Extra GB) برای هر ریسلر می‌تواند جدا از قیمت عمومی تنظیم شود.
+- کاربران عادی همچنان فقط محصولات عمومی جدول `product` را مشاهده می‌کنند.
+
+### مسیر استفاده ادمین
+1. منوی مدیریت محصول → **مدیریت ریسلرها**
+2. افزودن ریسلر با آیدی عددی تلگرام
+3. غیرفعال‌سازی ریسلر
+4. لیست ریسلرها
+5. تنظیم قیمت حجم اضافه مخصوص ریسلر
+
+## Upgrade guide
+برای ارتقا بدون از دست رفتن داده:
+
+```bash
+cd /path/to/botmirzapanel
+cp -r . ../botmirzapanel-backup-$(date +%F-%H%M)
+mysqldump -u DB_USER -p DB_NAME > ../botmirzapanel-db-backup-$(date +%F-%H%M).sql
+git pull
+php table.php
+```
+
+نکات مهم:
+- اجرای `php table.php` فقط باید جدول/فیلدهای جاافتاده را اضافه کند و نباید هیچ داده‌ای را drop/truncate کند.
+- جداول جدید:
+  - `resellers`
+  - `reseller_products`
+  - `reseller_settings`
+
+### Rollback
+- برای بازگشت فایل‌ها از بکاپ پوشه استفاده کنید.
+- برای بازگشت دیتابیس:
+
+```bash
+mysql -u DB_USER -p DB_NAME < ../botmirzapanel-db-backup-YYYY-MM-DD-HHMM.sql
+```
+
+## Release notes
+- New feature: reseller-specific products
+- New feature: reseller-specific prices
+- New feature: reseller-specific extra GB price
+- Compatibility: محصولات عمومی و کاربران فعلی بدون تغییر باقی می‌مانند.
+- Upgrade note: قبل از pull گرفتن، از فایل‌ها و دیتابیس بکاپ تهیه کنید.

@@ -42,7 +42,10 @@ function update($table, $field, $newValue, $whereField = null, $whereValue = nul
         "DiscountSell",
         "affiliates",
         "cancel_service",
-        "category"
+        "category",
+        "resellers",
+        "reseller_products",
+        "reseller_settings"
     ];
     if(!in_array($table, $tables))return;
     if ($whereField !== null) {
@@ -96,6 +99,81 @@ function select($table, $field, $whereField = null, $whereValue = null, $type = 
     }
 }
 
+
+function isReseller($userId)
+{
+    global $pdo;
+    $stmt = $pdo->prepare("SELECT status FROM resellers WHERE user_id = :user_id LIMIT 1");
+    $stmt->bindValue(':user_id', $userId, PDO::PARAM_STR);
+    $stmt->execute();
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    return $row && $row['status'] === 'active';
+}
+
+function getAvailableProductsForUser($userId, $location = null, $category = null)
+{
+    global $pdo;
+    $isRes = isReseller($userId);
+    $params = [];
+    if ($isRes) {
+        $sql = "SELECT code_product,name_product,price_product,Volume_constraint,Location,Service_time,Category FROM reseller_products WHERE reseller_user_id = :uid AND status = 'active'";
+        $params[':uid'] = $userId;
+        if ($location !== null) {
+            $sql .= " AND (Location = :location OR Location = '/all')";
+            $params[':location'] = $location;
+        }
+        if ($category !== null) {
+            $sql .= " AND Category = :category";
+            $params[':category'] = $category;
+        }
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if (count($rows) > 0) {
+            return $rows;
+        }
+    }
+    $sql = "SELECT code_product,name_product,price_product,Volume_constraint,Location,Service_time,Category FROM product WHERE 1=1";
+    $params = [];
+    if ($location !== null) {
+        $sql .= " AND (Location = :location OR Location = '/all')";
+        $params[':location'] = $location;
+    }
+    if ($category !== null) {
+        $sql .= " AND Category = :category";
+        $params[':category'] = $category;
+    }
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function getProductForUser($userId, $codeProduct, $location = null)
+{
+    $products = getAvailableProductsForUser($userId, $location, null);
+    foreach ($products as $product) {
+        if ((string)$product['code_product'] === (string)$codeProduct) {
+            return $product;
+        }
+    }
+    return null;
+}
+
+function getResellerExtraVolumePrice($userId)
+{
+    global $pdo;
+    if (isReseller($userId)) {
+        $stmt = $pdo->prepare("SELECT extra_volume_price FROM reseller_settings WHERE reseller_user_id = :uid LIMIT 1");
+        $stmt->bindValue(':uid', $userId, PDO::PARAM_STR);
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row && isset($row['extra_volume_price']) && $row['extra_volume_price'] !== null && $row['extra_volume_price'] !== '') {
+            return floatval($row['extra_volume_price']);
+        }
+    }
+    $setting = select("setting", "*");
+    return floatval($setting['Extra_volume']);
+}
 function generateUUID()
 {
     $data = openssl_random_pseudo_bytes(16);

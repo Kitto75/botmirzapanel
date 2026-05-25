@@ -1372,3 +1372,10 @@ $textbotlang['users']['Report']['discountuser'] = "کد هدیه %s استفاد
 🪪  نام کاربری : @%s
 💰 مبلغ هدیه %s تومان";
 
+
+$textbotlang['Admin']['reseller']['manage'] = '👥 مدیریت ریسلرها';
+$textbotlang['Admin']['reseller']['add'] = '➕ افزودن ریسلر';
+$textbotlang['Admin']['reseller']['remove'] = '➖ غیرفعال‌سازی ریسلر';
+$textbotlang['Admin']['reseller']['list'] = '📋 لیست ریسلرها';
+$textbotlang['Admin']['reseller']['setextra'] = '💰 قیمت حجم اضافه ریسلر';
+$textbotlang['Admin']['reseller']['addproduct'] = '🛍 افزودن محصول ریسلر';
