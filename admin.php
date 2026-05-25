@@ -2453,3 +2453,27 @@ if ($text == $textbotlang['users']['status']['manageService']) {
     sendmessage($from_id, $textbotlang['Admin']['addorder']['added_order'], $keyboardadmin, 'HTML');
     step('home', $from_id);
 }
+if ($text == $textbotlang['Admin']['reseller']['manage']) {
+    sendmessage($from_id, 'مدیریت ریسلرها', $resellerkeyboard, 'HTML');
+    step('none', $from_id);
+}
+if ($text == $textbotlang['Admin']['reseller']['add']) {
+    sendmessage($from_id, 'آیدی عددی کاربر ریسلر را ارسال کنید', $backadmin, 'HTML');
+    step('reseller_add_user', $from_id);
+}
+if ($user['step'] == 'reseller_add_user' && is_numeric($text)) {
+    $stmt = $pdo->prepare("INSERT INTO resellers (user_id,status) VALUES (?, 'active') ON DUPLICATE KEY UPDATE status='active'");
+    $stmt->execute([$text]);
+    sendmessage($from_id, 'ریسلر با موفقیت ذخیره شد', $resellerkeyboard, 'HTML');
+    step('none', $from_id);
+}
+if ($text == $textbotlang['Admin']['reseller']['remove']) {
+    sendmessage($from_id, 'آیدی عددی ریسلر را ارسال کنید', $backadmin, 'HTML');
+    step('reseller_remove_user', $from_id);
+}
+if ($user['step'] == 'reseller_remove_user' && is_numeric($text)) {
+    $stmt = $pdo->prepare("UPDATE resellers SET status='inactive' WHERE user_id=?");
+    $stmt->execute([$text]);
+    sendmessage($from_id, 'ریسلر غیرفعال شد', $resellerkeyboard, 'HTML');
+    step('none', $from_id);
+}

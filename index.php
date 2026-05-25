@@ -37,6 +37,7 @@ if (!checktelegramip())
 #-------------Variable----------#
 $users_ids = select("user", "id", null, null, "FETCH_COLUMN");
 $setting = select("setting", "*");
+$extraVolumePrice = getResellerExtraVolumePrice($from_id);
 $admin_ids = select("admin", "id_admin", null, null, "FETCH_COLUMN");
 if (!in_array($from_id, $users_ids) && intval($from_id) != 0) {
     $Response = json_encode([
@@ -1153,7 +1154,7 @@ if (preg_match('/subscriptionurl_(\w+)/', $datain, $dataget)) {
     $username = $dataget[1];
     update("user", "Processing_value", $username, "id", $from_id);
     $textextra = " .";
-    sendmessage($from_id, sprintf($textbotlang['users']['Extra_volume']['VolumeValue'], $setting['Extra_volume']), $backuser, 'HTML');
+    sendmessage($from_id, sprintf($textbotlang['users']['Extra_volume']['VolumeValue'], $extraVolumePrice), $backuser, 'HTML');
     step('getvolumeextra', $from_id);
 } elseif ($user['step'] == "getvolumeextra") {
     if (!ctype_digit($text)) {
@@ -1172,14 +1173,14 @@ if (preg_match('/subscriptionurl_(\w+)/', $datain, $dataget)) {
             ]
         ]
     ]);
-    $priceextra = number_format($priceextra * $setting['Extra_volume']);
-    $setting['Extra_volume'] = number_format($setting['Extra_volume']);
-    $textextra = sprintf($textbotlang['users']['Extra_volume']['invoiceExtraVolume'], $setting['Extra_volume'], $priceextra, $text);
+    $priceextra = number_format($priceextra * $extraVolumePrice);
+    $extraVolumePrice = number_format($extraVolumePrice);
+    $textextra = sprintf($textbotlang['users']['Extra_volume']['invoiceExtraVolume'], $extraVolumePrice, $priceextra, $text);
     sendmessage($from_id, $textextra, $keyboardsetting, 'HTML');
     step('home', $from_id);
 } elseif (preg_match('/confirmaextra_(\w+)/', $datain, $dataget)) {
     $volume = $dataget[1];
-    $price_extra = $setting['Extra_volume'] * $volume;
+    $price_extra = $extraVolumePrice * $volume;
     Editmessagetext($from_id, $message_id, $text_callback, json_encode(['inline_keyboard' => []]));
     $nameloc = select("invoice", "*", "username", $user['Processing_value'], "select");
     if ($nameloc == false) {
@@ -1191,14 +1192,14 @@ if (preg_match('/subscriptionurl_(\w+)/', $datain, $dataget)) {
         sendmessage($from_id, $textbotlang['users']['status']['error'], null, 'html');
         return;
     }
-    if ($user['Balance'] < $price_extra && intval($setting['Extra_volume']) != 0) {
+    if ($user['Balance'] < $price_extra && intval($extraVolumePrice) != 0) {
         $Balance_prim = $price_extra - $user['Balance'];
         update("user", "Processing_value", $Balance_prim, "id", $from_id);
         sendmessage($from_id, $textbotlang['users']['sell']['None-credit'], $step_payment, 'HTML');
         step('get_step_payment', $from_id);
         return;
     }
-    if (intval($setting['Extra_volume']) != 0) {
+    if (intval($extraVolumePrice) != 0) {
         $Balance_Low_user = $user['Balance'] - $price_extra;
         update("user", "Balance", $Balance_Low_user, "id", $from_id);
     }
@@ -1242,7 +1243,7 @@ if (preg_match('/subscriptionurl_(\w+)/', $datain, $dataget)) {
             "volume" => $data_limit,
         );
     } elseif ($marzban_list_get['type'] == "wgdashboard") {
-        $data_limit = ($DataUserOut['data_limit'] / pow(1024, 3)) + ($volume / $setting['Extra_volume']);
+        $data_limit = ($DataUserOut['data_limit'] / pow(1024, 3)) + ($volume / $extraVolumePrice);
         $datauser = get_userwg($nameloc['username'], $nameloc['Service_location']);
         $count = 0;
         foreach ($datauser['jobs'] as $jobsvolume) {
