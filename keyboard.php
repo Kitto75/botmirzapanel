@@ -647,6 +647,11 @@ function KeyboardProduct($location, $backdata, $MethodUsername, $categoryid = nu
             ];
         }
     }
+    if (isReseller($GLOBALS['from_id'] ?? 0)) {
+        $product['inline_keyboard'][] = [
+            ['text' => $textbotlang['users']['buy']['reseller_custom_volume_button'], 'callback_data' => "reseller_custom_volume_start"]
+        ];
+    }
     $product['inline_keyboard'][] = [
         ['text' => $textbotlang['users']['backmenu'], 'callback_data' => $backdata]
     ];

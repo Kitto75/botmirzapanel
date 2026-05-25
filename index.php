@@ -1672,6 +1672,56 @@ if ($text == $datatextbot['text_sell'] || $datain == "buy" || $text == "/buy") {
     update("user", "Processing_value_one", $prodcut, "id", $from_id);
     sendmessage($from_id, $textbotlang['users']['selectusername'], $backuser, 'html');
     step('endstepuser', $from_id);
+} elseif ($datain == "reseller_custom_volume_start" && isReseller($from_id)) {
+    $extraPrice = getResellerExtraVolumePrice($from_id);
+    if ($extraPrice <= 0) {
+        sendmessage($from_id, $textbotlang['users']['buy']['reseller_extra_price_missing'], $backuser, 'HTML');
+        return;
+    }
+    sendmessage($from_id, $textbotlang['users']['buy']['reseller_ask_volume'], $backuser, 'HTML');
+    update("user", "Processing_value_four", json_encode(['type' => 'reseller_custom_volume']), "id", $from_id);
+    step('reseller_custom_volume_get_volume', $from_id);
+} elseif ($user['step'] == "reseller_custom_volume_get_volume") {
+    if (!is_numeric($text) || floatval($text) <= 0) {
+        sendmessage($from_id, $textbotlang['users']['buy']['reseller_invalid_volume'], $backuser, 'HTML');
+        return;
+    }
+    $dataCv = ['type' => 'reseller_custom_volume', 'volume' => floatval($text)];
+    update("user", "Processing_value_four", json_encode($dataCv), "id", $from_id);
+    sendmessage($from_id, $textbotlang['users']['buy']['reseller_ask_time'], $backuser, 'HTML');
+    step('reseller_custom_volume_get_time', $from_id);
+} elseif ($user['step'] == "reseller_custom_volume_get_time") {
+    if (!is_numeric($text) || intval($text) < 0) {
+        sendmessage($from_id, $textbotlang['users']['buy']['reseller_invalid_time'], $backuser, 'HTML');
+        return;
+    }
+    $cv = json_decode($user['Processing_value_four'], true);
+    $volume = floatval($cv['volume'] ?? 0);
+    $timeDays = intval($text);
+    $location = $user['Processing_value'];
+    $extraPrice = getResellerExtraVolumePrice($from_id);
+    if ($volume <= 0 || $extraPrice <= 0 || empty($location)) {
+        sendmessage($from_id, $textbotlang['users']['status']['error2'], $keyboard, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    $totalPrice = intval(round($volume * $extraPrice));
+    $generated = [
+        'type' => 'reseller_custom_volume',
+        'reseller_user_id' => $from_id,
+        'volume' => $volume,
+        'location' => $location,
+        'service_time' => $timeDays,
+        'price_per_gb' => $extraPrice,
+        'price' => $totalPrice,
+        'name_product' => "حجم دلخواه {$volume} گیگ",
+        'code_product' => "rc_{$from_id}_" . bin2hex(random_bytes(2))
+    ];
+    update("user", "Processing_value_one", $generated['code_product'], "id", $from_id);
+    update("user", "Processing_value_four", json_encode($generated), "id", $from_id);
+    $invoiceText = sprintf($textbotlang['users']['buy']['reseller_custom_volume_invoice'], $from_id, $generated['volume'], number_format($generated['price_per_gb'], 0), number_format($generated['price'], 0), $generated['location'], $generated['service_time']);
+    sendmessage($from_id, $invoiceText, $payment, 'HTML');
+    step('endstepuser', $from_id);
 } elseif ($user['step'] == "endstepuser" || preg_match('/prodcutservice_(.*)/', $datain, $dataget)) {
     if ($user['step'] != "endstepuser") {
         $prodcut = $dataget[1];
@@ -1698,11 +1748,18 @@ if ($text == $datatextbot['text_sell'] || $datain == "buy" || $text == "/buy") {
         return;
     }
     update("user", "Processing_value_one", $loc, "id", $from_id);
-    $stmt = $pdo->prepare("SELECT * FROM product WHERE code_product = :code_product AND (location = :loc1 OR location = '/all') LIMIT 1");
-    $stmt->bindValue(':code_product', $loc);
-    $stmt->bindValue(':loc1', $user['Processing_value']);
-    $stmt->execute();
-    $info_product = $stmt->fetch(PDO::FETCH_ASSOC);
+    $cv = json_decode($user['Processing_value_four'], true);
+    if (is_array($cv) && ($cv['type'] ?? '') === 'reseller_custom_volume' && ($cv['code_product'] ?? '') === $loc) {
+        $info_product = [
+            'name_product' => $cv['name_product'],
+            'Service_time' => $cv['service_time'],
+            'price_product' => $cv['price'],
+            'Volume_constraint' => $cv['volume'],
+            'Location' => $cv['location']
+        ];
+    } else {
+        $info_product = getProductForUser($from_id, $loc, $user['Processing_value']);
+    }
     if ($info_product == false) {
         sendmessage($from_id, $textbotlang['users']['status']['error2'], $keyboard, 'HTML');
         step("home", $from_id);
@@ -1727,11 +1784,18 @@ if ($text == $datatextbot['text_sell'] || $datain == "buy" || $text == "/buy") {
 } elseif ($user['step'] == "payment" && $datain == "confirmandgetservice" || $datain == "confirmandgetserviceDiscount") {
     Editmessagetext($from_id, $message_id, $text_callback, json_encode(['inline_keyboard' => []]));
     $partsdic = explode("_", $user['Processing_value_four']);
-    $stmt = $pdo->prepare("SELECT * FROM product WHERE code_product = :code AND (location = :loc1 OR location = '/all') LIMIT 1");
-    $stmt->bindValue(':code', $user['Processing_value_one']);
-    $stmt->bindValue(':loc1', $user['Processing_value']);
-    $stmt->execute();
-    $info_product = $stmt->fetch(PDO::FETCH_ASSOC);
+    $cv = json_decode($user['Processing_value_four'], true);
+    if (is_array($cv) && ($cv['type'] ?? '') === 'reseller_custom_volume' && ($cv['code_product'] ?? '') === $user['Processing_value_one']) {
+        $info_product = [
+            'name_product' => $cv['name_product'],
+            'Service_time' => $cv['service_time'],
+            'price_product' => $cv['price'],
+            'Volume_constraint' => $cv['volume'],
+            'Location' => $cv['location']
+        ];
+    } else {
+        $info_product = getProductForUser($from_id, $user['Processing_value_one'], $user['Processing_value']);
+    }
     if ($info_product == false) {
         sendmessage($from_id, $textbotlang['users']['status']['error2'], $keyboard, 'HTML');
         return;
@@ -1947,11 +2011,18 @@ if ($text == $datatextbot['text_sell'] || $datain == "buy" || $text == "/buy") {
         sendmessage($from_id, $textbotlang['Admin']['Discount']['invalidcodedis'], null, 'HTML');
         return;
     }
-    $stmt = $pdo->prepare("SELECT * FROM product WHERE code_product = :code AND (location = :loc1 OR location = '/all') LIMIT 1");
-    $stmt->bindValue(':code', $user['Processing_value_one']);
-    $stmt->bindValue(':loc1', $user['Processing_value']);
-    $stmt->execute();
-    $info_product = $stmt->fetch(PDO::FETCH_ASSOC);
+    $cv = json_decode($user['Processing_value_four'], true);
+    if (is_array($cv) && ($cv['type'] ?? '') === 'reseller_custom_volume' && ($cv['code_product'] ?? '') === $user['Processing_value_one']) {
+        $info_product = [
+            'name_product' => $cv['name_product'],
+            'Service_time' => $cv['service_time'],
+            'price_product' => $cv['price'],
+            'Volume_constraint' => $cv['volume'],
+            'Location' => $cv['location']
+        ];
+    } else {
+        $info_product = getProductForUser($from_id, $user['Processing_value_one'], $user['Processing_value']);
+    }
     if ($info_product == false) {
         sendmessage($from_id, $textbotlang['users']['status']['error2'], $keyboard, 'HTML');
         step('home', $from_id);

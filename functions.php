@@ -130,7 +130,7 @@ function isAdminUser($userId)
     return (bool)$stmt->fetchColumn();
 }
 
-function getAvailableProductsForUser($userId, $location = null, $category = null)
+function getAvailableProductsForUser($userId, $location = null, $category = null, $allowResellerFallback = false)
 {
     global $pdo;
     $isRes = isReseller($userId);
@@ -149,7 +149,7 @@ function getAvailableProductsForUser($userId, $location = null, $category = null
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        if (count($rows) > 0) {
+        if (count($rows) > 0 || !$allowResellerFallback) {
             return $rows;
         }
     }

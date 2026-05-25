@@ -237,6 +237,13 @@ $textbotlang['users']['buy']['invoicebuy'] = "📇 پیش فاکتور شما:
 $textbotlang['users']['buy']['payandGet'] = "💰 پرداخت و دریافت سرویس";
 $textbotlang['users']['buy']['discount'] = "🎁 ثبت کد تخفیف";
 $textbotlang['users']['buy']['configwg'] = "⚙️ کانفیگ شما";
+$textbotlang['users']['buy']['reseller_custom_volume_button'] = "🧮 خرید با حجم دلخواه";
+$textbotlang['users']['buy']['reseller_ask_volume'] = "حجم سرویس را به گیگابایت وارد کنید.";
+$textbotlang['users']['buy']['reseller_ask_time'] = "مدت سرویس را به روز وارد کنید.";
+$textbotlang['users']['buy']['reseller_invalid_volume'] = "❌ حجم وارد شده نامعتبر است. یک عدد بزرگتر از صفر وارد کنید.";
+$textbotlang['users']['buy']['reseller_invalid_time'] = "❌ مدت سرویس نامعتبر است. یک عدد صفر یا بزرگتر وارد کنید.";
+$textbotlang['users']['buy']['reseller_extra_price_missing'] = "قیمت هر گیگ برای شما تنظیم نشده است؛ با مدیریت تماس بگیرید.";
+$textbotlang['users']['buy']['reseller_custom_volume_invoice'] = "🧾 پیش‌فاکتور خرید حجم دلخواه\n\n👤 شناسه ریسلر: <code>%s</code>\n📦 حجم: <code>%s GB</code>\n💵 قیمت هر گیگ: <code>%s</code> تومان\n💰 مبلغ کل: <code>%s</code> تومان\n📍 لوکیشن: <code>%s</code>\n⏳ مدت سرویس: <code>%s</code> روز";
 
 
 
