@@ -47,11 +47,13 @@ $keyboard = [
         [['text' => $datatextbot['text_sell']], ['text' => $datatextbot['text_usertest']]],
         [['text' => $datatextbot['text_Purchased_services']], ['text' => $datatextbot['text_Tariff_list']]],
         [['text' => $datatextbot['text_account']], ['text' => $datatextbot['text_Add_Balance']]],
-        [['text' => $textbotlang['users']['affiliates']['btn']]],
         [['text' => $datatextbot['text_support']], ['text' => $datatextbot['text_help']]],
     ],
     'resize_keyboard' => true
 ];
+if (!isReseller($from_id)) {
+    $keyboard['keyboard'][] = [['text' => $textbotlang['users']['affiliates']['btn']]];
+}
 if (isAdminUser($from_id)) {
     $keyboard['keyboard'][] = [
         ['text' => $textbotlang['Admin']['commendadmin']],
@@ -647,7 +649,7 @@ function KeyboardProduct($location, $backdata, $MethodUsername, $categoryid = nu
             ];
         }
     }
-    if (isReseller($GLOBALS['from_id'] ?? 0)) {
+    if (isReseller($GLOBALS['from_id'] ?? 0) && getResellerExtraVolumePrice($GLOBALS['from_id'] ?? 0) > 0) {
         $product['inline_keyboard'][] = [
             ['text' => $textbotlang['users']['buy']['reseller_custom_volume_button'], 'callback_data' => "reseller_custom_volume_start"]
         ];

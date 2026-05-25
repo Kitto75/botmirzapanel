@@ -1587,6 +1587,7 @@ if ($text == $datatextbot['text_account']) {
     $Balanceuser = number_format($user['Balance'], 0);
     $countorder = select("invoice", "id_user", 'id_user', $from_id, "count");
     $text_account = sprintf($textbotlang['users']['account'], $first_name, $from_id, $Balanceuser, $countorder, $user['affiliatescount'], $dateacc, $timeacc);
+    $text_account .= "\n\n" . (isReseller($from_id) ? $textbotlang['users']['account_type_reseller'] : $textbotlang['users']['account_type_normal']);
     sendmessage($from_id, $text_account, $keyboardPanel, 'HTML');
 }
 if ($text == $datatextbot['text_sell'] || $datain == "buy" || $text == "/buy") {
@@ -1606,8 +1607,8 @@ if ($text == $datatextbot['text_sell'] || $datain == "buy" || $text == "/buy") {
         $panel = select("marzban_panel", "*", "status", "activepanel", "select");
         update("user", "Processing_value", $panel['name_panel'], "id", $from_id, "select");
         if ($setting['statuscategory'] == "0") {
-            $nullproduct = select("product", "*", null, null, "count");
-            if ($nullproduct == 0) {
+            $available = getAvailableProductsForUser($from_id, $panel['name_panel'], null);
+            if (count($available) == 0 && (!isReseller($from_id) || getResellerExtraVolumePrice($from_id) <= 0)) {
                 sendmessage($from_id, $textbotlang['Admin']['Product']['nullpProduct'], null, 'HTML');
                 return;
             }
@@ -1634,9 +1635,8 @@ if ($text == $datatextbot['text_sell'] || $datain == "buy" || $text == "/buy") {
     }
 } elseif (preg_match('/^categorylist_(.*)/', $datain, $dataget)) {
     $categoryid = $dataget[1];
-    $product = [];
-    $nullproduct = select("product", "*", null, null, "count");
-    if ($nullproduct == 0) {
+    $available = getAvailableProductsForUser($from_id, $user['Processing_value'], $categoryid);
+    if (count($available) == 0 && (!isReseller($from_id) || getResellerExtraVolumePrice($from_id) <= 0)) {
         sendmessage($from_id, $textbotlang['Admin']['Product']['nullpProduct'], null, 'HTML');
         return;
     }
@@ -1653,8 +1653,8 @@ if ($text == $datatextbot['text_sell'] || $datain == "buy" || $text == "/buy") {
     $location = $panellist['name_panel'];
     update("user", "Processing_value", $location, "id", $from_id);
     if ($setting['statuscategory'] == "0") {
-        $nullproduct = select("product", "*", null, null, "count");
-        if ($nullproduct == 0) {
+        $available = getAvailableProductsForUser($from_id, $panellist['name_panel'], null);
+        if (count($available) == 0 && (!isReseller($from_id) || getResellerExtraVolumePrice($from_id) <= 0)) {
             sendmessage($from_id, $textbotlang['Admin']['Product']['nullpProduct'], null, 'HTML');
             return;
         }
@@ -2423,13 +2423,21 @@ if ($datain == "Discount") {
 }
 #----------------[  text_Tariff_list  ]------------------#
 if ($text == $datatextbot['text_Tariff_list']) {
-    sendmessage($from_id, $datatextbot['text_dec_Tariff_list'], null, 'HTML');
+    if (isReseller($from_id)) {
+        sendmessage($from_id, formatResellerTariffList($from_id), null, 'HTML');
+    } else {
+        sendmessage($from_id, $datatextbot['text_dec_Tariff_list'], null, 'HTML');
+    }
 }
 if ($datain == "closelist") {
     deletemessage($from_id, $message_id);
     sendmessage($from_id, $textbotlang['users']['back'], $keyboard, 'HTML');
 }
 if ($text == $textbotlang['users']['affiliates']['btn']) {
+    if (isReseller($from_id)) {
+        sendmessage($from_id, $textbotlang['users']['affiliates']['reseller_disabled'], null, 'HTML');
+        return;
+    }
     $affiliatesvalue = select("affiliates", "*", null, null, "select")['affiliatesstatus'];
     if ($affiliatesvalue == "offaffiliates") {
         sendmessage($from_id, $textbotlang['users']['affiliates']['offaffiliates'], $keyboard, 'HTML');
@@ -2474,6 +2482,22 @@ if ($text == $textbotlang['users']['affiliates']['btn']) {
     }
     $textaffiliates = sprintf($textbotlang['users']['affiliates']['infotext'], $price_Discount, $affiliatespercentage);
     sendmessage($from_id, $textaffiliates, $keyboard, 'HTML');
+}
+if (preg_match('/^\/debug_reseller_products\s+(\d+)$/', trim((string)$text), $debugMatch) && isAdminUser($from_id)) {
+    $uid = $debugMatch[1];
+    $isRes = isReseller($uid) ? 'true' : 'false';
+    $resellerRow = getResellerByUserId($uid);
+    $activeCount = 0;
+    if ($resellerRow) {
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM reseller_products WHERE reseller_user_id = :uid AND status = 'active'");
+        $stmt->execute([':uid' => $uid]);
+        $activeCount = intval($stmt->fetchColumn());
+    }
+    $globalCount = intval($pdo->query("SELECT COUNT(*) FROM product")->fetchColumn());
+    $extra = getResellerExtraVolumePrice($uid);
+    $status = $resellerRow['status'] ?? 'not-found';
+    $msg = "🔎 debug_reseller_products\nuser_id: <code>{$uid}</code>\nisReseller: <code>{$isRes}</code>\nreseller_status: <code>{$status}</code>\nactive_reseller_products: <code>{$activeCount}</code>\nreseller_extra_volume_price: <code>{$extra}</code>\nglobal_product_count: <code>{$globalCount}</code>";
+    sendmessage($from_id, $msg, null, 'HTML');
 }
 require_once 'admin.php';
 $connect->close();
