@@ -190,9 +190,37 @@ function getResellerExtraVolumePrice($userId)
         if ($row && isset($row['extra_volume_price']) && $row['extra_volume_price'] !== null && $row['extra_volume_price'] !== '') {
             return floatval($row['extra_volume_price']);
         }
+        return 0;
     }
     $setting = select("setting", "*");
     return floatval($setting['Extra_volume']);
+}
+function formatResellerTariffList($resellerUserId)
+{
+    global $textbotlang;
+    $products = getAvailableProductsForUser($resellerUserId, null, null, false);
+    $extraPrice = getResellerExtraVolumePrice($resellerUserId);
+    $lines = [];
+    $lines[] = $textbotlang['users']['tariff']['reseller_title'];
+    if (!empty($products)) {
+        foreach ($products as $i => $product) {
+            $lines[] = "";
+            $lines[] = "📦 " . ($i + 1) . ") {$product['name_product']}";
+            $lines[] = "💰 قیمت: " . number_format(floatval($product['price_product']), 0) . " تومان";
+            $lines[] = "📊 حجم: {$product['Volume_constraint']}";
+            $lines[] = "⏳ مدت: {$product['Service_time']}";
+            $lines[] = "📍 لوکیشن: {$product['Location']}";
+            $lines[] = "🗂 دسته‌بندی: {$product['Category']}";
+        }
+    }
+    if ($extraPrice > 0) {
+        $lines[] = "";
+        $lines[] = sprintf($textbotlang['users']['tariff']['reseller_extra_gb_label'], number_format($extraPrice, 0));
+    }
+    if (empty($products) && $extraPrice <= 0) {
+        return $textbotlang['users']['tariff']['reseller_empty'];
+    }
+    return implode("\n", $lines);
 }
 function getResellerByUserId($userId)
 {
