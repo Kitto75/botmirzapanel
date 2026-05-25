@@ -126,12 +126,12 @@ Ensure you have the following before installation:
 - 🖥️ **Ubuntu Server 22**
 - 🌐 **A Domain Name**
 
-### 🔧 Installing the Bot (Stable Version)
-
-Run the following command in your server terminal:
+### 🔧 Installing the Bot (Stable Version - Fork)
 
 ```bash
-curl -o install.sh -L https://raw.githubusercontent.com/mahdiMGF2/botmirzapanel/main/install.sh && bash install.sh
+git clone https://github.com/Kitto75/botmirzapanel.git
+cd botmirzapanel
+sudo bash install.sh
 ```
 
 When prompted, **select option 1** to complete the installation.
@@ -145,7 +145,7 @@ When prompted, **select option 1** to complete the installation.
 To install the beta version, run:
 
 ```bash
-curl -o install.sh -L https://raw.githubusercontent.com/mahdiMGF2/botmirzapanel/main/install.sh && bash install.sh -beta
+sudo bash install.sh -beta
 ```
 
 ---
@@ -155,7 +155,7 @@ curl -o install.sh -L https://raw.githubusercontent.com/mahdiMGF2/botmirzapanel/
 To update your bot to the latest version, use the following command:
 
 ```bash
-curl -o install.sh -L https://raw.githubusercontent.com/mahdiMGF2/botmirzapanel/main/install.sh && bash install.sh -update
+sudo bash install.sh -update
 ```
 
 ---
@@ -165,7 +165,7 @@ curl -o install.sh -L https://raw.githubusercontent.com/mahdiMGF2/botmirzapanel/
 If you want to completely remove the bot from your server, run the following command:
 
 ```bash
-curl -o install.sh -L https://raw.githubusercontent.com/mahdiMGF2/botmirzapanel/main/install.sh && bash install.sh
+sudo bash install.sh
 ```
 
 When prompted, **select option 3** to remove the bot.
@@ -199,7 +199,7 @@ Your support ensures continued updates and improvements for this project. Thank 
 - کاربران عادی همچنان فقط محصولات عمومی جدول `product` را مشاهده می‌کنند.
 
 ### مسیر استفاده ادمین
-1. منوی مدیریت محصول → **مدیریت ریسلرها**
+1. ادمین پنل → **🏬 بخش فروشگاه** → **👥 مدیریت ریسلرها**
 2. افزودن ریسلر با آیدی عددی تلگرام
 3. غیرفعال‌سازی ریسلر
 4. لیست ریسلرها

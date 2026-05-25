@@ -2455,25 +2455,85 @@ if ($text == $textbotlang['users']['status']['manageService']) {
 }
 if ($text == $textbotlang['Admin']['reseller']['manage']) {
     sendmessage($from_id, 'مدیریت ریسلرها', $resellerkeyboard, 'HTML');
-    step('none', $from_id);
+    step('home', $from_id);
 }
 if ($text == $textbotlang['Admin']['reseller']['add']) {
     sendmessage($from_id, 'آیدی عددی کاربر ریسلر را ارسال کنید', $backadmin, 'HTML');
     step('reseller_add_user', $from_id);
 }
-if ($user['step'] == 'reseller_add_user' && is_numeric($text)) {
+if ($user['step'] == 'reseller_add_user') {
+    if (!preg_match('/^\d+$/', $text)) {
+        sendmessage($from_id, '❌ لطفاً فقط آیدی عددی معتبر ارسال کنید.', $backadmin, 'HTML');
+        return;
+    }
     $stmt = $pdo->prepare("INSERT INTO resellers (user_id,status) VALUES (?, 'active') ON DUPLICATE KEY UPDATE status='active'");
     $stmt->execute([$text]);
     sendmessage($from_id, 'ریسلر با موفقیت ذخیره شد', $resellerkeyboard, 'HTML');
-    step('none', $from_id);
+    step('home', $from_id);
 }
 if ($text == $textbotlang['Admin']['reseller']['remove']) {
     sendmessage($from_id, 'آیدی عددی ریسلر را ارسال کنید', $backadmin, 'HTML');
     step('reseller_remove_user', $from_id);
 }
-if ($user['step'] == 'reseller_remove_user' && is_numeric($text)) {
+if ($user['step'] == 'reseller_remove_user') {
+    if (!preg_match('/^\d+$/', $text)) {
+        sendmessage($from_id, '❌ لطفاً فقط آیدی عددی معتبر ارسال کنید.', $backadmin, 'HTML');
+        return;
+    }
     $stmt = $pdo->prepare("UPDATE resellers SET status='inactive' WHERE user_id=?");
     $stmt->execute([$text]);
     sendmessage($from_id, 'ریسلر غیرفعال شد', $resellerkeyboard, 'HTML');
-    step('none', $from_id);
+    step('home', $from_id);
+}
+if ($text == $textbotlang['Admin']['reseller']['list']) {
+    $active = select("resellers", "user_id", "status", "active", "fetchAll");
+    $inactive = select("resellers", "user_id", "status", "inactive", "fetchAll");
+    $active_list = empty($active) ? "ندارد" : implode("\n", array_column($active, "user_id"));
+    $inactive_list = empty($inactive) ? "ندارد" : implode("\n", array_column($inactive, "user_id"));
+    sendmessage($from_id, "✅ ریسلرهای فعال:\n{$active_list}\n\n⛔ ریسلرهای غیرفعال:\n{$inactive_list}", $resellerkeyboard, 'HTML');
+    step('home', $from_id);
+}
+if ($text == $textbotlang['Admin']['reseller']['setextra']) {
+    sendmessage($from_id, 'آیدی عددی ریسلر را ارسال کنید.', $backadmin, 'HTML');
+    step('reseller_setextra_id', $from_id);
+}
+if ($user['step'] == 'reseller_setextra_id') {
+    if (!preg_match('/^\d+$/', $text)) {
+        sendmessage($from_id, '❌ آیدی باید عددی باشد.', $backadmin, 'HTML');
+        return;
+    }
+    savedata("clear", "reseller_user_id", $text);
+    sendmessage($from_id, 'قیمت حجم اضافه این ریسلر را به عدد ارسال کنید.', $backadmin, 'HTML');
+    step('reseller_setextra_price', $from_id);
+}
+if ($user['step'] == 'reseller_setextra_price') {
+    if (!preg_match('/^\d+$/', $text)) {
+        sendmessage($from_id, '❌ قیمت باید عددی باشد.', $backadmin, 'HTML');
+        return;
+    }
+    $data = json_decode($user['Processing_value'], true);
+    $stmt = $pdo->prepare("INSERT INTO reseller_settings (reseller_user_id,extra_volume_price) VALUES (?,?) ON DUPLICATE KEY UPDATE extra_volume_price=VALUES(extra_volume_price)");
+    $stmt->execute([$data['reseller_user_id'], $text]);
+    sendmessage($from_id, '✅ قیمت حجم اضافه ریسلر با موفقیت ثبت شد.', $resellerkeyboard, 'HTML');
+    step('home', $from_id);
+}
+if ($text == $textbotlang['Admin']['reseller']['addproduct']) {
+    sendmessage($from_id, "فرمت ارسال:\nuser_id|code|name|price|volume|location|time|category\nمثال:\n12345|p100|پلن ویژه|150000|100|IR|30|1", $backadmin, 'HTML');
+    step('reseller_add_product', $from_id);
+}
+if ($user['step'] == 'reseller_add_product') {
+    $parts = array_map('trim', explode('|', $text));
+    if (count($parts) != 8) {
+        sendmessage($from_id, '❌ فرمت نادرست است.', $backadmin, 'HTML');
+        return;
+    }
+    list($rid, $code, $name, $price, $volume, $location, $stime, $cat) = $parts;
+    if (!preg_match('/^\d+$/', $rid) || !preg_match('/^\d+$/', $price) || !preg_match('/^\d+$/', $volume) || !preg_match('/^\d+$/', $stime) || !preg_match('/^\d+$/', $cat)) {
+        sendmessage($from_id, '❌ آیدی/قیمت/حجم/زمان/دسته‌بندی باید عددی باشد.', $backadmin, 'HTML');
+        return;
+    }
+    $stmt = $pdo->prepare("INSERT INTO reseller_products (reseller_user_id,code_product,name_product,price_product,Volume_constraint,Location,Service_time,Category,status) VALUES (?,?,?,?,?,?,?,?, 'active')");
+    $stmt->execute([$rid, $code, $name, $price, $volume, $location, $stime, $cat]);
+    sendmessage($from_id, '✅ محصول ریسلر با موفقیت افزوده شد.', $resellerkeyboard, 'HTML');
+    step('home', $from_id);
 }

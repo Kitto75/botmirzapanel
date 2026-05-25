@@ -653,4 +653,13 @@ function KeyboardProduct($location, $backdata, $MethodUsername, $categoryid = nu
 
     return json_encode($product);
 }
-$resellerkeyboard = json_encode(['keyboard' => [[[ 'text' => $textbotlang['Admin']['reseller']['add']],[ 'text' => $textbotlang['Admin']['reseller']['remove']]],[[ 'text' => $textbotlang['Admin']['reseller']['list']]],[[ 'text' => $textbotlang['Admin']['reseller']['setextra']]],[[ 'text' => $textbotlang['Admin']['Back-Adminment']]]], 'resize_keyboard' => true]);
+$resellerkeyboard = json_encode([
+    'keyboard' => [
+        [['text' => $textbotlang['Admin']['reseller']['add']], ['text' => $textbotlang['Admin']['reseller']['remove']]],
+        [['text' => $textbotlang['Admin']['reseller']['list']]],
+        [['text' => $textbotlang['Admin']['reseller']['setextra']]],
+        [['text' => $textbotlang['Admin']['reseller']['addproduct']]],
+        [['text' => $textbotlang['Admin']['Back-Adminment']]],
+    ],
+    'resize_keyboard' => true
+]);
