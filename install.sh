@@ -15,6 +15,35 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_OWNER="${REPO_OWNER:-Kitto75}"
+REPO_NAME="${REPO_NAME:-botmirzapanel}"
+REPO_FULL="$REPO_OWNER/$REPO_NAME"
+
+get_zip_url() {
+    if [[ "$1" == "-v" && "$2" == "beta" ]] || [[ "$1" == "-beta" ]] || [[ "$1" == "-" && "$2" == "beta" ]]; then
+        echo "https://github.com/${REPO_FULL}/archive/refs/heads/main.zip"
+    elif [[ "$1" == "-v" && -n "$2" ]]; then
+        echo "https://github.com/${REPO_FULL}/archive/refs/tags/$2.zip"
+    else
+        curl -s "https://api.github.com/repos/${REPO_FULL}/releases/latest" | grep "zipball_url" | cut -d '"' -f 4
+    fi
+}
+
+sync_local_repo_to_bot_dir() {
+    local target_dir="$1"
+    if [[ -f "$SCRIPT_DIR/index.php" && -f "$SCRIPT_DIR/admin.php" && -f "$SCRIPT_DIR/keyboard.php" && -f "$SCRIPT_DIR/table.php" ]]; then
+        rsync -a --delete             --exclude='.git'             --exclude='.github'             --exclude='*.bak'             --exclude='*.tmp'             --exclude='config.php'             --exclude='user.txt'             --exclude='cron/users.json'             --exclude='cron/info'             "$SCRIPT_DIR/" "$target_dir/"
+        return 0
+    fi
+    return 1
+}
+
+link_mirza_command() {
+    chmod +x "$SCRIPT_DIR/install.sh"
+    ln -sf "$SCRIPT_DIR/install.sh" /usr/local/bin/mirza
+}
+
 # Check SSL certificate status and days remaining
 check_ssl_status() {
     # First get domain from config file
@@ -419,31 +448,22 @@ function install_bot() {
         exit 1
     fi
 
-    # Default to latest release
-    ZIP_URL=$(curl -s https://api.github.com/repos/mahdiMGF2/botmirzapanel/releases/latest | grep "zipball_url" | cut -d '"' -f 4)
-
-# Check for version flag
-if [[ "$1" == "-v" && "$2" == "beta" ]] || [[ "$1" == "-beta" ]] || [[ "$1" == "-" && "$2" == "beta" ]]; then
-    ZIP_URL="https://github.com/mahdiMGF2/botmirzapanel/archive/refs/heads/main.zip"
-elif [[ "$1" == "-v" && -n "$2" ]]; then
-    ZIP_URL="https://github.com/mahdiMGF2/botmirzapanel/archive/refs/tags/$2.zip"
-fi
-
-    # Download and extract the repository
-    TEMP_DIR="/tmp/mirzabot"
-    mkdir -p "$TEMP_DIR"
-    wget -O "$TEMP_DIR/bot.zip" "$ZIP_URL" || {
-        echo -e "\e[91mError: Failed to download the specified version.\033[0m"
-        exit 1
-    }
-
-    unzip "$TEMP_DIR/bot.zip" -d "$TEMP_DIR"
-    EXTRACTED_DIR=$(find "$TEMP_DIR" -mindepth 1 -maxdepth 1 -type d)
-    mv "$EXTRACTED_DIR"/* "$BOT_DIR" || {
-        echo -e "\e[91mError: Failed to move extracted files.\033[0m"
-        exit 1
-    }
-    rm -rf "$TEMP_DIR"
+    if ! sync_local_repo_to_bot_dir "$BOT_DIR"; then
+        ZIP_URL=$(get_zip_url "$1" "$2")
+        TEMP_DIR="/tmp/mirzabot"
+        mkdir -p "$TEMP_DIR"
+        wget -O "$TEMP_DIR/bot.zip" "$ZIP_URL" || {
+            echo -e "\e[91mError: Failed to download the specified version.\033[0m"
+            exit 1
+        }
+        unzip "$TEMP_DIR/bot.zip" -d "$TEMP_DIR"
+        EXTRACTED_DIR=$(find "$TEMP_DIR" -mindepth 1 -maxdepth 1 -type d)
+        mv "$EXTRACTED_DIR"/* "$BOT_DIR" || {
+            echo -e "\e[91mError: Failed to move extracted files.\033[0m"
+            exit 1
+        }
+        rm -rf "$TEMP_DIR"
+    fi
 
     sudo chown -R www-data:www-data "$BOT_DIR"
     sudo chmod -R 755 "$BOT_DIR"
@@ -755,8 +775,7 @@ echo -e "$text_to_save" >> /var/www/html/mirzabotconfig/config.php
     fi
 
     # Add executable permission and link
-    chmod +x /root/install.sh
-    ln -vs /root/install.sh /usr/local/bin/mirza
+    link_mirza_command
 
 }
 
@@ -1013,30 +1032,25 @@ function install_bot_with_marzban() {
         exit 1
     }
 
-    # Download bot files
-    ZIP_URL=$(curl -s https://api.github.com/repos/mahdiMGF2/botmirzapanel/releases/latest | grep "zipball_url" | cut -d '"' -f 4)
-    if [[ "$1" == "-v" && "$2" == "beta" ]] || [[ "$1" == "-beta" ]] || [[ "$1" == "-" && "$2" == "beta" ]]; then
-        ZIP_URL="https://github.com/mahdiMGF2/botmirzapanel/archive/refs/heads/main.zip"
-    elif [[ "$1" == "-v" && -n "$2" ]]; then
-        ZIP_URL="https://github.com/mahdiMGF2/botmirzapanel/archive/refs/tags/$2.zip"
+    if ! sync_local_repo_to_bot_dir "$BOT_DIR"; then
+        ZIP_URL=$(get_zip_url "$1" "$2")
+        TEMP_DIR="/tmp/mirzabot"
+        mkdir -p "$TEMP_DIR"
+        wget -O "$TEMP_DIR/bot.zip" "$ZIP_URL" || {
+            echo -e "\e[91mError: Failed to download bot files.\033[0m"
+            exit 1
+        }
+        unzip "$TEMP_DIR/bot.zip" -d "$TEMP_DIR" || {
+            echo -e "\e[91mError: Failed to unzip bot files.\033[0m"
+            exit 1
+        }
+        EXTRACTED_DIR=$(find "$TEMP_DIR" -mindepth 1 -maxdepth 1 -type d)
+        mv "$EXTRACTED_DIR"/* "$BOT_DIR" || {
+            echo -e "\e[91mError: Failed to move bot files.\033[0m"
+            exit 1
+        }
+        rm -rf "$TEMP_DIR"
     fi
-
-    TEMP_DIR="/tmp/mirzabot"
-    mkdir -p "$TEMP_DIR"
-    wget -O "$TEMP_DIR/bot.zip" "$ZIP_URL" || {
-        echo -e "\e[91mError: Failed to download bot files.\033[0m"
-        exit 1
-    }
-    unzip "$TEMP_DIR/bot.zip" -d "$TEMP_DIR" || {
-        echo -e "\e[91mError: Failed to unzip bot files.\033[0m"
-        exit 1
-    }
-    EXTRACTED_DIR=$(find "$TEMP_DIR" -mindepth 1 -maxdepth 1 -type d)
-    mv "$EXTRACTED_DIR"/* "$BOT_DIR" || {
-        echo -e "\e[91mError: Failed to move bot files.\033[0m"
-        exit 1
-    }
-    rm -rf "$TEMP_DIR"
 
     sudo chown -R www-data:www-data "$BOT_DIR"
     sudo chmod -R 755 "$BOT_DIR"
@@ -1280,8 +1294,7 @@ EOF
     echo -e "\033[33mDatabase password: \033[36m$DB_PASSWORD\033[0m"
 
     # Add executable permission and link
-    chmod +x /root/install.sh
-    ln -vs /root/install.sh /usr/local/bin/mirza
+    link_mirza_command
 }
 
 # Update Function
@@ -1302,27 +1315,19 @@ function update_bot() {
         exit 1
     fi
 
-    # Fetch latest release from GitHub
-    # Check for version flag
-    if [[ "$1" == "-beta" ]] || [[ "$1" == "-v" && "$2" == "beta" ]]; then
-        ZIP_URL="https://github.com/mahdiMGF2/botmirzapanel/archive/refs/heads/main.zip"
-    else
-        ZIP_URL=$(curl -s https://api.github.com/repos/mahdiMGF2/botmirzapanel/releases/latest | grep "zipball_url" | cut -d '"' -f4)
-    fi
-
-    # Create temporary directory
     TEMP_DIR="/tmp/mirzabot_update"
     mkdir -p "$TEMP_DIR"
-
-    # Download and extract
-    wget -O "$TEMP_DIR/bot.zip" "$ZIP_URL" || {
-        echo -e "\e[91mError: Failed to download update package.\033[0m"
-        exit 1
-    }
-    unzip "$TEMP_DIR/bot.zip" -d "$TEMP_DIR"
-
-    # Find extracted directory
-    EXTRACTED_DIR=$(find "$TEMP_DIR" -mindepth 1 -maxdepth 1 -type d)
+    if ! sync_local_repo_to_bot_dir "$TEMP_DIR/source"; then
+        ZIP_URL=$(get_zip_url "$1" "$2")
+        wget -O "$TEMP_DIR/bot.zip" "$ZIP_URL" || {
+            echo -e "\e[91mError: Failed to download update package.\033[0m"
+            exit 1
+        }
+        unzip "$TEMP_DIR/bot.zip" -d "$TEMP_DIR"
+        EXTRACTED_DIR=$(find "$TEMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -n1)
+    else
+        EXTRACTED_DIR="$TEMP_DIR/source"
+    fi
 
     # Backup config file
     CONFIG_PATH="/var/www/html/mirzabotconfig/config.php"
@@ -1355,13 +1360,6 @@ function update_bot() {
         }
     fi
 
-    # Copy the new install.sh to /root/
-    if [ -f "/var/www/html/mirzabotconfig/install.sh" ]; then
-        sudo cp /var/www/html/mirzabotconfig/install.sh /root/install.sh
-        echo -e "\n\e[92mCopied latest install.sh to /root/install.sh.\033[0m"
-    else
-        echo -e "\n\e[91mWarning: install.sh not found in /var/www/html/mirzabotconfig/ after update. Cannot update /root/install.sh.\033[0m"
-    fi
 
     # Set permissions
     sudo chown -R www-data:www-data /var/www/html/mirzabotconfig/
@@ -1369,7 +1367,7 @@ function update_bot() {
 
     # Run setup script
     URL=$(grep '\$domainhosts' "$CONFIG_PATH" | cut -d"'" -f2)
-    curl -s "https://$URL/table.php" || {
+    curl -s "$URL/table.php" || {
         echo -e "\e[91mSetup script execution failed!\033[0m"
     }
 
@@ -1378,14 +1376,7 @@ function update_bot() {
 
     echo -e "\n\e[92mMirza Bot updated to latest version successfully!\033[0m"
 
-    # Ensure /root/install.sh is executable and linked
-    if [ -f "/root/install.sh" ]; then
-        sudo chmod +x /root/install.sh
-        sudo ln -vsf /root/install.sh /usr/local/bin/mirza
-        echo -e "\e[92mEnsured /root/install.sh is executable and 'mirza' command is linked.\033[0m"
-    else
-        echo -e "\e[91mError: /root/install.sh not found after update attempt. Cannot make it executable or link 'mirza' command.\033[0m"
-    fi
+    link_mirza_command
 }
 
 # Delete Function
@@ -2080,7 +2071,7 @@ EOF"
     # Clone a Fresh Copy of the Bot's Source Code
     BOT_DIR="/var/www/html/$BOT_NAME"
     echo -e "\033[33mCloning bot's source code...\033[0m"
-    git clone https://github.com/mahdiMGF2/botmirzapanel.git "$BOT_DIR" || {
+    git clone https://github.com/${REPO_FULL}.git "$BOT_DIR" || {
         echo -e "\033[31mError: Failed to clone the repository.\033[0m"
         return 1
     }
@@ -2247,7 +2238,7 @@ function update_additional_bot() {
     fi
 
     # Clone the new version of the bot
-    if ! git clone https://github.com/mahdiMGF2/botmirzapanel.git "$BOT_PATH"; then
+    if ! git clone https://github.com/${REPO_FULL}.git "$BOT_PATH"; then
         echo -e "\033[31mFailed to clone the repository. Exiting...\033[0m"
         return 1
     fi
@@ -2269,7 +2260,7 @@ function update_additional_bot() {
         return 1
     fi
 
-    if ! curl -s "https://$URL/table.php"; then
+    if ! curl -s "$URL/table.php"; then
         echo -e "\033[31mFailed to execute table.php. Exiting...\033[0m"
         return 1
     fi
