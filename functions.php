@@ -194,6 +194,81 @@ function getResellerExtraVolumePrice($userId)
     $setting = select("setting", "*");
     return floatval($setting['Extra_volume']);
 }
+function getResellerByUserId($userId)
+{
+    global $pdo;
+    $stmt = $pdo->prepare("SELECT * FROM resellers WHERE user_id = :uid LIMIT 1");
+    $stmt->execute([':uid' => $userId]);
+    return $stmt->fetch(PDO::FETCH_ASSOC);
+}
+function getResellerProductById($id)
+{
+    global $pdo;
+    $stmt = $pdo->prepare("SELECT * FROM reseller_products WHERE id = :id LIMIT 1");
+    $stmt->execute([':id' => $id]);
+    return $stmt->fetch(PDO::FETCH_ASSOC);
+}
+function buildResellerProductsKeyboard($resellerUserId, $page = 1)
+{
+    global $pdo;
+    $page = max(1, intval($page));
+    $limit = 10;
+    $offset = ($page - 1) * $limit;
+    $stmt = $pdo->prepare("SELECT * FROM reseller_products WHERE reseller_user_id = :uid AND status='active' ORDER BY id DESC LIMIT :lim OFFSET :off");
+    $stmt->bindValue(':uid', $resellerUserId, PDO::PARAM_STR);
+    $stmt->bindValue(':lim', $limit, PDO::PARAM_INT);
+    $stmt->bindValue(':off', $offset, PDO::PARAM_INT);
+    $stmt->execute();
+    $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $keyboard = ['inline_keyboard' => []];
+    foreach ($products as $product) {
+        $label = "{$product['name_product']} | {$product['price_product']} | {$product['Volume_constraint']}GB | {$product['Service_time']}d";
+        $keyboard['inline_keyboard'][] = [[
+            'text' => mb_substr($label, 0, 60),
+            'callback_data' => "reseller_product_view_{$product['id']}"
+        ]];
+    }
+    $countStmt = $pdo->prepare("SELECT COUNT(*) FROM reseller_products WHERE reseller_user_id = :uid AND status='active'");
+    $countStmt->execute([':uid' => $resellerUserId]);
+    $total = intval($countStmt->fetchColumn());
+    $maxPage = max(1, (int)ceil($total / $limit));
+    $nav = [];
+    if ($page > 1) $nav[] = ['text' => '⬅️', 'callback_data' => "reseller_products_page_{$resellerUserId}_" . ($page - 1)];
+    if ($page < $maxPage) $nav[] = ['text' => '➡️', 'callback_data' => "reseller_products_page_{$resellerUserId}_" . ($page + 1)];
+    if (!empty($nav)) $keyboard['inline_keyboard'][] = $nav;
+    return json_encode($keyboard);
+}
+function buildResellerExtraPricesKeyboard($page = 1)
+{
+    global $pdo;
+    $page = max(1, intval($page));
+    $limit = 10;
+    $offset = ($page - 1) * $limit;
+    $stmt = $pdo->prepare("SELECT r.user_id, COALESCE(rs.extra_volume_price,0) AS extra_volume_price FROM resellers r LEFT JOIN reseller_settings rs ON rs.reseller_user_id=r.user_id WHERE r.status='active' ORDER BY r.user_id ASC LIMIT :lim OFFSET :off");
+    $stmt->bindValue(':lim', $limit, PDO::PARAM_INT);
+    $stmt->bindValue(':off', $offset, PDO::PARAM_INT);
+    $stmt->execute();
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $keyboard = ['inline_keyboard' => []];
+    foreach ($rows as $row) {
+        $keyboard['inline_keyboard'][] = [[
+            'text' => "{$row['user_id']} | {$row['extra_volume_price']}",
+            'callback_data' => "reseller_extra_view_{$row['user_id']}"
+        ]];
+    }
+    $total = intval($pdo->query("SELECT COUNT(*) FROM resellers WHERE status='active'")->fetchColumn());
+    $maxPage = max(1, (int)ceil($total / $limit));
+    $nav = [];
+    if ($page > 1) $nav[] = ['text' => '⬅️', 'callback_data' => "reseller_extra_page_" . ($page - 1)];
+    if ($page < $maxPage) $nav[] = ['text' => '➡️', 'callback_data' => "reseller_extra_page_" . ($page + 1)];
+    if (!empty($nav)) $keyboard['inline_keyboard'][] = $nav;
+    return json_encode($keyboard);
+}
+function formatResellerProductDetails($product)
+{
+    global $textbotlang;
+    return sprintf($textbotlang['Admin']['reseller']['product_details'], $product['reseller_user_id'], $product['id'], $product['code_product'], $product['name_product'], $product['price_product'], $product['Volume_constraint'], $product['Location'], $product['Service_time'], $product['Category'], $product['status']);
+}
 function generateUUID()
 {
     $data = openssl_random_pseudo_bytes(16);
