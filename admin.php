@@ -2642,3 +2642,123 @@ if ($user['step'] == 'reseller_add_product_category') {
     sendmessage($from_id, sprintf($textbotlang['Admin']['reseller']['addproduct_success'], $data['reseller_user_id'], $codeProduct, $data['name_product'], $data['price_product'], $data['Volume_constraint'], $data['Location'], $data['Service_time'], $categoryValue), $resellerkeyboard, 'HTML');
     step('home', $from_id);
 }
+if ($text == $textbotlang['Admin']['reseller']['products']) {
+    $rows = select('resellers', '*', 'status', 'active', 'fetchAll');
+    if (empty($rows)) {
+        sendmessage($from_id, $textbotlang['Admin']['reseller']['no_resellers'], $resellerkeyboard, 'HTML');
+        return;
+    }
+    $ik = ['inline_keyboard' => []];
+    foreach (array_slice($rows, 0, 10) as $row) $ik['inline_keyboard'][] = [[ 'text' => $row['user_id'], 'callback_data' => "reseller_products_user_{$row['user_id']}" ]];
+    sendmessage($from_id, $textbotlang['Admin']['reseller']['select_reseller'], json_encode($ik), 'HTML');
+}
+if (preg_match('/^reseller_products_user_(\d+)$/', $datain, $m)) {
+    $rid = $m[1];
+    $kb = buildResellerProductsKeyboard($rid, 1);
+    sendmessage($from_id, "📦 لیست محصولات ریسلر <code>{$rid}</code>", $kb, 'HTML');
+}
+if (preg_match('/^reseller_products_page_(\d+)_(\d+)$/', $datain, $m)) {
+    $rid = $m[1]; $page = $m[2];
+    sendmessage($from_id, "📦 لیست محصولات ریسلر <code>{$rid}</code>", buildResellerProductsKeyboard($rid, $page), 'HTML');
+}
+if (preg_match('/^reseller_product_view_(\d+)$/', $datain, $m)) {
+    $product = getResellerProductById($m[1]);
+    if (empty($product)) { sendmessage($from_id, $textbotlang['Admin']['reseller']['err_product_not_found'], null, 'HTML'); return; }
+    $ik = ['inline_keyboard' => [
+        [['text' => '✏️ ویرایش نام', 'callback_data' => "reseller_product_edit_name_{$product['id']}"], ['text' => '✏️ ویرایش قیمت', 'callback_data' => "reseller_product_edit_price_{$product['id']}"]],
+        [['text' => '✏️ ویرایش حجم', 'callback_data' => "reseller_product_edit_volume_{$product['id']}"], ['text' => '✏️ ویرایش لوکیشن', 'callback_data' => "reseller_product_edit_location_{$product['id']}"]],
+        [['text' => '✏️ ویرایش مدت', 'callback_data' => "reseller_product_edit_time_{$product['id']}"], ['text' => '✏️ ویرایش دسته‌بندی', 'callback_data' => "reseller_product_edit_category_{$product['id']}"]],
+        [['text' => '🗑 حذف محصول', 'callback_data' => "reseller_product_delete_{$product['id']}"]],
+        [['text' => '🔙 بازگشت به محصولات این ریسلر', 'callback_data' => "reseller_products_user_{$product['reseller_user_id']}"]],
+    ]];
+    sendmessage($from_id, formatResellerProductDetails($product), json_encode($ik), 'HTML');
+}
+if (preg_match('/^reseller_product_edit_(name|price|volume|location|time|category)_(\d+)$/', $datain, $m)) {
+    $field = $m[1]; $pid = $m[2];
+    savedata('clear', 'reseller_edit_product_id', $pid);
+    savedata('save', 'reseller_edit_field', $field);
+    $promptMap = ['name'=>'edit_name_prompt','price'=>'edit_price_prompt','volume'=>'edit_volume_prompt','location'=>'edit_location_prompt','time'=>'edit_time_prompt','category'=>'edit_category_prompt'];
+    if ($field == 'location') {
+        $panels = select('marzban_panel', '*', null, null, 'fetchAll');
+        $names = empty($panels) ? 'ندارد' : implode("\n", array_map(fn($p) => "- {$p['name_panel']}", $panels));
+        sendmessage($from_id, sprintf($textbotlang['Admin']['reseller'][$promptMap[$field]], $names), $backadmin, 'HTML');
+    } elseif ($field == 'category') {
+        $cats = select('category', '*', null, null, 'fetchAll');
+        $catText = empty($cats) ? 'ندارد' : implode("\n", array_map(fn($c) => "- {$c['id']} | {$c['remark']}", $cats));
+        sendmessage($from_id, sprintf($textbotlang['Admin']['reseller'][$promptMap[$field]], $catText), $backadmin, 'HTML');
+    } else sendmessage($from_id, $textbotlang['Admin']['reseller'][$promptMap[$field]], $backadmin, 'HTML');
+    step('reseller_product_edit_value', $from_id);
+}
+if ($user['step'] == 'reseller_product_edit_value') {
+    $pv = json_decode($user['Processing_value'], true); $pid = $pv['reseller_edit_product_id'] ?? null; $field = $pv['reseller_edit_field'] ?? null;
+    $product = getResellerProductById($pid); if (!$product) return;
+    $map = ['name'=>'name_product','price'=>'price_product','volume'=>'Volume_constraint','location'=>'Location','time'=>'Service_time','category'=>'Category'];
+    $value = trim($text);
+    if ($field == 'name' && $value == '') { sendmessage($from_id, $textbotlang['Admin']['reseller']['err_name_required'], $backadmin, 'HTML'); return; }
+    if (in_array($field, ['price','volume','time']) && !preg_match('/^\d+$/', $value)) { sendmessage($from_id, $textbotlang['Admin']['reseller']["err_{$field}_numeric"], $backadmin, 'HTML'); return; }
+    if ($field == 'location' && $value !== '/all' && empty(select('marzban_panel', '*', 'name_panel', $value, 'select'))) { sendmessage($from_id, $textbotlang['Admin']['reseller']['err_location_invalid'], $backadmin, 'HTML'); return; }
+    if ($field == 'category' && $value !== '0') { $cat = preg_match('/^\d+$/', $value) ? select('category','*','id',$value,'select') : select('category','*','remark',$value,'select'); if (empty($cat)) { sendmessage($from_id, $textbotlang['Admin']['reseller']['err_category_invalid'], $backadmin, 'HTML'); return; } $value = $cat['id'];}
+    $stmt = $pdo->prepare("UPDATE reseller_products SET {$map[$field]} = :val WHERE id = :id");
+    $stmt->execute([':val' => $value, ':id' => $pid]);
+    sendmessage($from_id, $textbotlang['Admin']['reseller']['edit_success'], null, 'HTML');
+    step('home', $from_id);
+    $product = getResellerProductById($pid);
+    sendmessage($from_id, formatResellerProductDetails($product), null, 'HTML');
+}
+if (preg_match('/^reseller_product_delete_(\d+)$/', $datain, $m)) {
+    $pid = $m[1];
+    $ik = ['inline_keyboard' => [
+        [['text' => '✅ تایید حذف', 'callback_data' => "reseller_product_delete_confirm_{$pid}"], ['text' => '❌ لغو', 'callback_data' => "reseller_product_view_{$pid}"]]
+    ]];
+    sendmessage($from_id, $textbotlang['Admin']['reseller']['delete_confirm'], json_encode($ik), 'HTML');
+}
+if (preg_match('/^reseller_product_delete_confirm_(\d+)$/', $datain, $m)) {
+    $product = getResellerProductById($m[1]);
+    if (!$product) return;
+    $stmt = $pdo->prepare("UPDATE reseller_products SET status='inactive' WHERE id=:id");
+    $stmt->execute([':id' => $m[1]]);
+    sendmessage($from_id, $textbotlang['Admin']['reseller']['delete_success'], null, 'HTML');
+    sendmessage($from_id, "📦 لیست محصولات ریسلر <code>{$product['reseller_user_id']}</code>", buildResellerProductsKeyboard($product['reseller_user_id'], 1), 'HTML');
+}
+if ($text == $textbotlang['Admin']['reseller']['extra_list']) {
+    sendmessage($from_id, '📋 لیست قیمت حجم اضافه ریسلرها', buildResellerExtraPricesKeyboard(1), 'HTML');
+}
+if (preg_match('/^reseller_extra_page_(\d+)$/', $datain, $m)) {
+    sendmessage($from_id, '📋 لیست قیمت حجم اضافه ریسلرها', buildResellerExtraPricesKeyboard($m[1]), 'HTML');
+}
+if (preg_match('/^reseller_extra_view_(\d+)$/', $datain, $m)) {
+    $rid = $m[1];
+    $stmt = $pdo->prepare("SELECT * FROM reseller_settings WHERE reseller_user_id=:id LIMIT 1");
+    $stmt->execute([':id' => $rid]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    $price = $row['extra_volume_price'] ?? 0; $created = $row['created_at'] ?? '-';
+    $ik = ['inline_keyboard' => [
+        [['text' => '✏️ ویرایش قیمت هر گیگ', 'callback_data' => "reseller_extra_edit_{$rid}"]],
+        [['text' => '🗑 حذف/بازنشانی قیمت اختصاصی', 'callback_data' => "reseller_extra_reset_{$rid}"]],
+        [['text' => '🔙 بازگشت', 'callback_data' => 'reseller_extra_page_1']]
+    ]];
+    sendmessage($from_id, sprintf($textbotlang['Admin']['reseller']['extra_details'], $rid, $price, $created), json_encode($ik), 'HTML');
+}
+if (preg_match('/^reseller_extra_edit_(\d+)$/', $datain, $m)) {
+    savedata('clear', 'reseller_extra_user_id', $m[1]);
+    step('reseller_extra_edit_value', $from_id);
+    sendmessage($from_id, $textbotlang['Admin']['reseller']['extra_edit_prompt'], $backadmin, 'HTML');
+}
+if ($user['step'] == 'reseller_extra_edit_value') {
+    if (!preg_match('/^\d+$/', $text)) { sendmessage($from_id, $textbotlang['Admin']['reseller']['err_price_numeric'], $backadmin, 'HTML'); return; }
+    $pv = json_decode($user['Processing_value'], true); $rid = $pv['reseller_extra_user_id'] ?? null;
+    $stmt = $pdo->prepare("INSERT INTO reseller_settings (reseller_user_id,extra_volume_price) VALUES (:uid,:p) ON DUPLICATE KEY UPDATE extra_volume_price=VALUES(extra_volume_price)");
+    $stmt->execute([':uid' => $rid, ':p' => $text]);
+    step('home', $from_id);
+    sendmessage($from_id, $textbotlang['Admin']['reseller']['extra_edit_success'], $resellerkeyboard, 'HTML');
+}
+if (preg_match('/^reseller_extra_reset_(\d+)$/', $datain, $m)) {
+    $ik = ['inline_keyboard' => [[['text' => '✅ تایید حذف', 'callback_data' => "reseller_extra_reset_confirm_{$m[1]}"], ['text' => '❌ لغو', 'callback_data' => "reseller_extra_view_{$m[1]}"]]]];
+    sendmessage($from_id, $textbotlang['Admin']['reseller']['extra_reset_confirm'], json_encode($ik), 'HTML');
+}
+if (preg_match('/^reseller_extra_reset_confirm_(\d+)$/', $datain, $m)) {
+    $stmt = $pdo->prepare("DELETE FROM reseller_settings WHERE reseller_user_id=:uid");
+    $stmt->execute([':uid' => $m[1]]);
+    sendmessage($from_id, $textbotlang['Admin']['reseller']['extra_reset_success'], null, 'HTML');
+    sendmessage($from_id, '📋 لیست قیمت حجم اضافه ریسلرها', buildResellerExtraPricesKeyboard(1), 'HTML');
+}

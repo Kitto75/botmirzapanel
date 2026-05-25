@@ -657,8 +657,8 @@ $resellerkeyboard = json_encode([
     'keyboard' => [
         [['text' => $textbotlang['Admin']['reseller']['add']], ['text' => $textbotlang['Admin']['reseller']['remove']]],
         [['text' => $textbotlang['Admin']['reseller']['list']]],
-        [['text' => $textbotlang['Admin']['reseller']['setextra']]],
-        [['text' => $textbotlang['Admin']['reseller']['addproduct']]],
+        [['text' => $textbotlang['Admin']['reseller']['addproduct'],], ['text' => $textbotlang['Admin']['reseller']['products']]],
+        [['text' => $textbotlang['Admin']['reseller']['setextra']], ['text' => $textbotlang['Admin']['reseller']['extra_list']]],
         [['text' => $textbotlang['Admin']['Back-Adminment']]],
     ],
     'resize_keyboard' => true
