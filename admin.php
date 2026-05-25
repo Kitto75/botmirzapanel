@@ -11,7 +11,6 @@ if (in_array($text, $textadmin) || $datain == "PANEL") {
     }
     $text_admin = sprintf($textbotlang['Admin']['login-admin'], $version);
     sendmessage($from_id, $text_admin, $keyboardadmin, 'HTML');
-}
 if ($text == $textbotlang['Admin']['Back-Adminment'] || $datain == "back_admin") {
     if ($datain == "back_admin")
         deletemessage($from_id, $message_id);
@@ -2518,22 +2517,112 @@ if ($user['step'] == 'reseller_setextra_price') {
     step('home', $from_id);
 }
 if ($text == $textbotlang['Admin']['reseller']['addproduct']) {
-    sendmessage($from_id, "فرمت ارسال:\nuser_id|code|name|price|volume|location|time|category\nمثال:\n12345|p100|پلن ویژه|150000|100|IR|30|1", $backadmin, 'HTML');
-    step('reseller_add_product', $from_id);
+    sendmessage($from_id, $textbotlang['Admin']['reseller']['addproduct_prompt_id'], $backadmin, 'HTML');
+    step('reseller_add_product_rid', $from_id);
 }
-if ($user['step'] == 'reseller_add_product') {
-    $parts = array_map('trim', explode('|', $text));
-    if (count($parts) != 8) {
-        sendmessage($from_id, '❌ فرمت نادرست است.', $backadmin, 'HTML');
+if ($user['step'] == 'reseller_add_product_rid') {
+    if (!preg_match('/^\d+$/', $text)) {
+        sendmessage($from_id, $textbotlang['Admin']['reseller']['err_rid_numeric'], $backadmin, 'HTML');
         return;
     }
-    list($rid, $code, $name, $price, $volume, $location, $stime, $cat) = $parts;
-    if (!preg_match('/^\d+$/', $rid) || !preg_match('/^\d+$/', $price) || !preg_match('/^\d+$/', $volume) || !preg_match('/^\d+$/', $stime) || !preg_match('/^\d+$/', $cat)) {
-        sendmessage($from_id, '❌ آیدی/قیمت/حجم/زمان/دسته‌بندی باید عددی باشد.', $backadmin, 'HTML');
+    $reseller = select('resellers', '*', 'user_id', $text, 'select');
+    if (empty($reseller) || $reseller['status'] != 'active') {
+        sendmessage($from_id, $textbotlang['Admin']['reseller']['err_rid_not_active'], $backadmin, 'HTML');
         return;
     }
+    savedata('clear', 'reseller_user_id', $text);
+    sendmessage($from_id, $textbotlang['Admin']['reseller']['addproduct_prompt_name'], $backadmin, 'HTML');
+    step('reseller_add_product_name', $from_id);
+}
+if ($user['step'] == 'reseller_add_product_name') {
+    $nameProduct = trim($text);
+    if ($nameProduct == '') {
+        sendmessage($from_id, $textbotlang['Admin']['reseller']['err_name_required'], $backadmin, 'HTML');
+        return;
+    }
+    savedata('save', 'name_product', $nameProduct);
+    sendmessage($from_id, $textbotlang['Admin']['reseller']['addproduct_prompt_price'], $backadmin, 'HTML');
+    step('reseller_add_product_price', $from_id);
+}
+if ($user['step'] == 'reseller_add_product_price') {
+    if (!preg_match('/^\d+$/', $text)) {
+        sendmessage($from_id, $textbotlang['Admin']['reseller']['err_price_numeric'], $backadmin, 'HTML');
+        return;
+    }
+    savedata('save', 'price_product', $text);
+    sendmessage($from_id, $textbotlang['Admin']['reseller']['addproduct_prompt_volume'], $backadmin, 'HTML');
+    step('reseller_add_product_volume', $from_id);
+}
+if ($user['step'] == 'reseller_add_product_volume') {
+    if (!preg_match('/^\d+$/', $text)) {
+        sendmessage($from_id, $textbotlang['Admin']['reseller']['err_volume_numeric'], $backadmin, 'HTML');
+        return;
+    }
+    savedata('save', 'Volume_constraint', $text);
+    $panels = select('marzban_panel', '*', null, null, 'fetchAll');
+    $panelNames = empty($panels) ? 'ندارد' : implode("\n", array_map(fn($p) => "- " . $p['name_panel'], $panels));
+    sendmessage($from_id, sprintf($textbotlang['Admin']['reseller']['addproduct_prompt_location'], $panelNames), $backadmin, 'HTML');
+    step('reseller_add_product_location', $from_id);
+}
+if ($user['step'] == 'reseller_add_product_location') {
+    $location = trim($text);
+    if ($location !== '/all') {
+        $panel = select('marzban_panel', '*', 'name_panel', $location, 'select');
+        if (empty($panel)) {
+            sendmessage($from_id, $textbotlang['Admin']['reseller']['err_location_invalid'], $backadmin, 'HTML');
+            return;
+        }
+    }
+    savedata('save', 'Location', $location);
+    sendmessage($from_id, $textbotlang['Admin']['reseller']['addproduct_prompt_time'], $backadmin, 'HTML');
+    step('reseller_add_product_time', $from_id);
+}
+if ($user['step'] == 'reseller_add_product_time') {
+    if (!preg_match('/^\d+$/', $text)) {
+        sendmessage($from_id, $textbotlang['Admin']['reseller']['err_time_numeric'], $backadmin, 'HTML');
+        return;
+    }
+    savedata('save', 'Service_time', $text);
+    $cats = select('category', '*', null, null, 'fetchAll');
+    $catText = 'ندارد';
+    if (!empty($cats)) {
+        $rows = [];
+        foreach ($cats as $catItem) {
+            $rows[] = "- {$catItem['id']} | {$catItem['remark']}";
+        }
+        $catText = implode("\n", $rows);
+    }
+    sendmessage($from_id, sprintf($textbotlang['Admin']['reseller']['addproduct_prompt_category'], $catText), $backadmin, 'HTML');
+    step('reseller_add_product_category', $from_id);
+}
+if ($user['step'] == 'reseller_add_product_category') {
+    $categoryInput = trim($text);
+    $categoryValue = 0;
+    if ($categoryInput !== '0') {
+        $category = null;
+        if (preg_match('/^\d+$/', $categoryInput)) {
+            $category = select('category', '*', 'id', $categoryInput, 'select');
+        }
+        if (empty($category)) {
+            $category = select('category', '*', 'remark', $categoryInput, 'select');
+        }
+        if (empty($category)) {
+            sendmessage($from_id, $textbotlang['Admin']['reseller']['err_category_invalid'], $backadmin, 'HTML');
+            return;
+        }
+        $categoryValue = $category['id'];
+    }
+
+    $data = json_decode($user['Processing_value'], true);
+    do {
+        $codeProduct = 'rp_' . $data['reseller_user_id'] . '_' . bin2hex(random_bytes(3));
+        $existingCode = select('reseller_products', '*', 'code_product', $codeProduct, 'select');
+    } while (!empty($existingCode));
+
     $stmt = $pdo->prepare("INSERT INTO reseller_products (reseller_user_id,code_product,name_product,price_product,Volume_constraint,Location,Service_time,Category,status) VALUES (?,?,?,?,?,?,?,?, 'active')");
-    $stmt->execute([$rid, $code, $name, $price, $volume, $location, $stime, $cat]);
-    sendmessage($from_id, '✅ محصول ریسلر با موفقیت افزوده شد.', $resellerkeyboard, 'HTML');
+    $stmt->execute([$data['reseller_user_id'], $codeProduct, $data['name_product'], $data['price_product'], $data['Volume_constraint'], $data['Location'], $data['Service_time'], $categoryValue]);
+
+    sendmessage($from_id, sprintf($textbotlang['Admin']['reseller']['addproduct_success'], $data['reseller_user_id'], $codeProduct, $data['name_product'], $data['price_product'], $data['Volume_constraint'], $data['Location'], $data['Service_time'], $categoryValue), $resellerkeyboard, 'HTML');
     step('home', $from_id);
+}
 }
