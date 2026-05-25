@@ -3,7 +3,7 @@ require_once 'config.php';
 require_once 'functions.php';
 require_once 'text.php';
 $setting = select("setting", "*");
-$admin_ids = select("admin", "id_admin", null, null, "FETCH_COLUMN");
+$admin_ids = array_map("strval", select("admin", "id_admin", null, null, "FETCH_COLUMN"));
 //-----------------------------[  text panel  ]-------------------------------
 $sql = "SHOW TABLES LIKE 'textbot'";
 $stmt = $pdo->prepare($sql);
@@ -52,7 +52,7 @@ $keyboard = [
     ],
     'resize_keyboard' => true
 ];
-if (in_array($from_id, $admin_ids)) {
+if (isAdminUser($from_id)) {
     $keyboard['keyboard'][] = [
         ['text' => $textbotlang['Admin']['commendadmin']],
     ];

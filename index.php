@@ -38,7 +38,7 @@ if (!checktelegramip())
 $users_ids = select("user", "id", null, null, "FETCH_COLUMN");
 $setting = select("setting", "*");
 $extraVolumePrice = getResellerExtraVolumePrice($from_id);
-$admin_ids = select("admin", "id_admin", null, null, "FETCH_COLUMN");
+$admin_ids = array_map("strval", select("admin", "id_admin", null, null, "FETCH_COLUMN"));
 if (!in_array($from_id, $users_ids) && intval($from_id) != 0) {
     $Response = json_encode([
         'inline_keyboard' => [
@@ -96,7 +96,7 @@ if ($user == false) {
         'affiliates' => '',
     );
 }
-if (($setting['status_verify'] == "1" && intval($user['verify']) == 0) && !in_array($from_id, $admin_ids)) {
+if (($setting['status_verify'] == "1" && intval($user['verify']) == 0) && !isAdminUser($from_id)) {
     sendmessage($from_id, $textbotlang['users']['VerifyUser'], null, 'html');
     return;
 }
@@ -225,7 +225,7 @@ if (floor($TimeLastMessage / 60) >= 1) {
     update("user", "last_message_time", $timebot, "id", $from_id);
     update("user", "message_count", "1", "id", $from_id);
 } else {
-    if (!in_array($from_id, $admin_ids)) {
+    if (!isAdminUser($from_id)) {
         $addmessage = intval($user['message_count']) + 1;
         update("user", "message_count", $addmessage, "id", $from_id);
         if ($user['message_count'] >= "35") {
@@ -236,7 +236,7 @@ if (floor($TimeLastMessage / 60) >= 1) {
             return;
         }
     }
-    if ($setting['Bot_Status'] == "✅  ربات روشن است" and !in_array($from_id, $admin_ids)) {
+    if ($setting['Bot_Status'] == "✅  ربات روشن است" and !isAdminUser($from_id)) {
         sendmessage($from_id, $textbotlang['users']['updatingbot'], null, 'html');
         foreach ($admin_ids as $admin) {
             sendmessage($admin, "❌ ادمین عزیز ربات فعال نیست جهت فعالسازی به منوی تنظیمات عمومی > وضعیت قابلیت ها بروید تا رباتتان فعال شود.", null, 'html');
@@ -246,7 +246,7 @@ if (floor($TimeLastMessage / 60) >= 1) {
 } #-----------Channel------------#
 $chanelcheck = channel($channels['link']);
 if ($datain == "confirmchannel") {
-    if (count($chanelcheck) != 0 && !in_array($from_id, $admin_ids)) {
+    if (count($chanelcheck) != 0 && !isAdminUser($from_id)) {
         telegram(
             'answerCallbackQuery',
             array(
@@ -262,7 +262,7 @@ if ($datain == "confirmchannel") {
     }
     return;
 }
-if (count($chanelcheck) != 0 && !in_array($from_id, $admin_ids)) {
+if (count($chanelcheck) != 0 && !isAdminUser($from_id)) {
     $link_channel = json_encode([
         'inline_keyboard' => [
             [
@@ -277,7 +277,7 @@ if (count($chanelcheck) != 0 && !in_array($from_id, $admin_ids)) {
     return;
 }
 #-----------roll------------#
-if ($setting['roll_Status'] == "1" && $user['roll_Status'] == 0 && $text != $textbotlang['users']['rulesaccept'] && !in_array($from_id, $admin_ids)) {
+if ($setting['roll_Status'] == "1" && $user['roll_Status'] == 0 && $text != $textbotlang['users']['rulesaccept'] && !isAdminUser($from_id)) {
     sendmessage($from_id, $datatextbot['text_roll'], $confrimrolls, 'html');
     return;
 }
@@ -288,7 +288,7 @@ if ($text == $textbotlang['users']['rulesaccept']) {
 }
 
 #-----------Bot_Status------------#
-if ($setting['Bot_Status'] == "0" && !in_array($from_id, $admin_ids)) {
+if ($setting['Bot_Status'] == "0" && !isAdminUser($from_id)) {
     sendmessage($from_id, $datatextbot['text_bot_off'], null, 'html');
     return;
 }

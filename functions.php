@@ -110,6 +110,26 @@ function isReseller($userId)
     return $row && $row['status'] === 'active';
 }
 
+
+function isAdminUser($userId)
+{
+    global $pdo, $adminnumber;
+    $userId = trim((string)$userId);
+    if ($userId === '') {
+        return false;
+    }
+    if ((string)$adminnumber !== '' && $userId === trim((string)$adminnumber)) {
+        return true;
+    }
+    if (!isset($pdo)) {
+        return false;
+    }
+    $stmt = $pdo->prepare("SELECT 1 FROM admin WHERE id_admin = :id_admin LIMIT 1");
+    $stmt->bindValue(':id_admin', $userId, PDO::PARAM_STR);
+    $stmt->execute();
+    return (bool)$stmt->fetchColumn();
+}
+
 function getAvailableProductsForUser($userId, $location = null, $category = null)
 {
     global $pdo;

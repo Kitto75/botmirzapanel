@@ -168,7 +168,7 @@ try {
         while ($row = mysqli_fetch_assoc($id_admin)) {
             $admin_ids[] = $row['id_admin'];
         }
-        if (!in_array($adminnumber, $admin_ids)) {
+        if (!in_array((string)$adminnumber, array_map("strval", $admin_ids), true)) {
             $connect->query("INSERT INTO admin (id_admin) VALUES ('$adminnumber')");
             echo "table admin update✅</br>";
         }
