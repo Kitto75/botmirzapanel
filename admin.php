@@ -18,6 +18,18 @@ if (!isAdminUser($from_id)) {
     return;
 }
 $admin_ids = array_map("strval", $admin_ids);
+if ($text == $textbotlang['Admin']['keyboardadmin']['toggle_bot_status']) {
+    if (!isMainAdmin($from_id)) {
+        sendmessage($from_id, '❌ فقط ادمین اصلی می‌تواند وضعیت ربات را تغییر دهد.', $keyboardadmin, 'HTML');
+        return;
+    }
+    $currentStatus = (string)($setting['Bot_Status'] ?? '1');
+    $newStatus = $currentStatus === '1' ? '0' : '1';
+    update("setting", "Bot_Status", $newStatus);
+    $statusText = $newStatus === '1' ? 'روشن' : 'خاموش';
+    sendmessage($from_id, "✅ ربات با موفقیت {$statusText} شد.", $keyboardadmin, 'HTML');
+    return;
+}
 if (in_array($text, $textadmin) || in_array(mb_strtolower(trim((string)$text)), ["ادمین","پنل مدیریت","panel","/panel"]) || $datain == "PANEL") {
     if (!(function_exists('shell_exec') && is_callable('shell_exec'))) {
         $cronCommandsendmessage = "*/1 * * * * curl https://$domainhosts/cron/sendmessage.php";
@@ -28,13 +40,119 @@ if (in_array($text, $textadmin) || in_array(mb_strtolower(trim((string)$text)), 
     step('admin_home', $from_id);
     return;
 }
-if ($text == $textbotlang['Admin']['Back-Adminment'] || $datain == "back_admin") {
+if ($text == $textbotlang['Admin']['Back-Adminment'] || $text == ($textbotlang['Admin']['backup']['back'] ?? '') || $datain == "back_admin") {
     if ($datain == "back_admin")
         deletemessage($from_id, $message_id);
     sendmessage($from_id, $textbotlang['Admin']['Back-Admin'], $keyboardadmin, 'HTML');
     step('home', $from_id);
     return;
-} elseif ($text == $textbotlang['Admin']['channel']['changechannelbtn']) {
+}
+$getBackupSettings = function () use ($pdo) {
+    $stmt = $pdo->prepare("SELECT * FROM backup_settings WHERE id = 1 LIMIT 1");
+    $stmt->execute();
+    $settings = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$settings) {
+        $pdo->prepare("INSERT IGNORE INTO backup_settings (id,status,interval_minutes,last_backup_at,target_chat_id) VALUES (1,'off',60,0,NULL)")->execute();
+        $settings = [
+            'id' => 1,
+            'status' => 'off',
+            'interval_minutes' => 60,
+            'last_backup_at' => 0,
+            'target_chat_id' => null,
+        ];
+    }
+    return $settings;
+};
+if ($text == $textbotlang['Admin']['keyboardadmin']['backup_manage']) {
+    $backupSettings = $getBackupSettings();
+    $backupStatus = $backupSettings['status'] === 'on' ? 'روشن' : 'خاموش';
+    $targetChatId = $backupSettings['target_chat_id'] ?: 'تنظیم نشده';
+    $backupText = "🗄 مدیریت بکاپ
+
+وضعیت: {$backupStatus}
+فاصله: {$backupSettings['interval_minutes']} دقیقه
+شناسه مقصد: {$targetChatId}";
+    sendmessage($from_id, $backupText, $backupkeyboard, 'HTML');
+    step('home', $from_id);
+    return;
+}
+if ($text == $textbotlang['Admin']['backup']['status_toggle']) {
+    $backupSettings = $getBackupSettings();
+    if ($backupSettings['status'] === 'on') {
+        $stmt = $pdo->prepare("UPDATE backup_settings SET status = 'off' WHERE id = 1");
+        $stmt->execute();
+        $cronResult = removeBackupCron();
+        sendmessage($from_id, $textbotlang['Admin']['backup']['turned_off'], $backupkeyboard, 'HTML');
+        if ($cronResult['success']) {
+            sendmessage($from_id, $textbotlang['Admin']['backup']['cron_removed'], $backupkeyboard, 'HTML');
+        } else {
+            sendmessage($from_id, sprintf($textbotlang['Admin']['backup']['cron_remove_manual'], $cronResult['command']), $backupkeyboard, 'HTML');
+        }
+        step('home', $from_id);
+        return;
+    }
+    sendmessage($from_id, $textbotlang['Admin']['backup']['interval_prompt'], $backadmin, 'HTML');
+    step('backup_enable_interval', $from_id);
+    return;
+}
+if ($text == $textbotlang['Admin']['backup']['set_interval']) {
+    sendmessage($from_id, $textbotlang['Admin']['backup']['interval_prompt'], $backadmin, 'HTML');
+    step('backup_update_interval', $from_id);
+    return;
+}
+if ($text == $textbotlang['Admin']['backup']['manual_now']) {
+    sendmessage($from_id, $textbotlang['Admin']['backup']['manual_started'], $backupkeyboard, 'HTML');
+    $backupResult = generateBotBackup();
+    if (empty($backupResult['success'])) {
+        sendmessage($from_id, sprintf($textbotlang['Admin']['backup']['manual_error'], htmlspecialchars($backupResult['error'] ?? 'خطای نامشخص', ENT_QUOTES, 'UTF-8')), $backupkeyboard, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    $sendResult = sendDocument($from_id, $backupResult['path'], '🗄 بکاپ دستی ربات');
+    @unlink($backupResult['path']);
+    if (empty($sendResult['ok'])) {
+        sendmessage($from_id, sprintf($textbotlang['Admin']['backup']['manual_error'], 'ارسال فایل به تلگرام ناموفق بود.'), $backupkeyboard, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    sendmessage($from_id, $textbotlang['Admin']['backup']['manual_success'], $backupkeyboard, 'HTML');
+    step('home', $from_id);
+    return;
+}
+if (in_array($user['step'], ['backup_enable_interval', 'backup_update_interval'])) {
+    if (!ctype_digit((string)$text) || intval($text) < 1) {
+        sendmessage($from_id, $textbotlang['Admin']['backup']['interval_invalid'], $backadmin, 'HTML');
+        return;
+    }
+    $intervalMinutes = intval($text);
+    if ($user['step'] == 'backup_enable_interval') {
+        $stmt = $pdo->prepare("UPDATE backup_settings SET status = 'on', interval_minutes = ?, target_chat_id = ? WHERE id = 1");
+        $stmt->execute([$intervalMinutes, $from_id]);
+        sendmessage($from_id, $textbotlang['Admin']['backup']['saved_on'], $backupkeyboard, 'HTML');
+        $cronResult = installBackupCron();
+        if ($cronResult['success']) {
+            sendmessage($from_id, $textbotlang['Admin']['backup']['cron_installed'], $backupkeyboard, 'HTML');
+        } else {
+            sendmessage($from_id, sprintf($textbotlang['Admin']['backup']['cron_manual'], $cronResult['command']), $backupkeyboard, 'HTML');
+        }
+    } else {
+        $stmt = $pdo->prepare("UPDATE backup_settings SET interval_minutes = ?, target_chat_id = ? WHERE id = 1");
+        $stmt->execute([$intervalMinutes, $from_id]);
+        sendmessage($from_id, $textbotlang['Admin']['backup']['saved_interval'], $backupkeyboard, 'HTML');
+        $backupSettings = $getBackupSettings();
+        if ($backupSettings['status'] === 'on') {
+            $cronResult = installBackupCron();
+            if ($cronResult['success']) {
+                sendmessage($from_id, $textbotlang['Admin']['backup']['cron_installed'], $backupkeyboard, 'HTML');
+            } else {
+                sendmessage($from_id, sprintf($textbotlang['Admin']['backup']['cron_manual'], $cronResult['command']), $backupkeyboard, 'HTML');
+            }
+        }
+    }
+    step('home', $from_id);
+    return;
+}
+if ($text == $textbotlang['Admin']['channel']['changechannelbtn']) {
     sendmessage($from_id, $textbotlang['Admin']['channel']['changechannel'] . $channels['link'], $backadmin, 'HTML');
     step('addchannel', $from_id);
 } elseif ($user['step'] == "addchannel") {
@@ -2482,8 +2600,24 @@ if ($user['step'] == 'reseller_add_user') {
         sendmessage($from_id, '❌ لطفاً فقط آیدی عددی معتبر ارسال کنید.', $backadmin, 'HTML');
         return;
     }
-    $stmt = $pdo->prepare("INSERT INTO resellers (user_id,status) VALUES (?, 'active') ON DUPLICATE KEY UPDATE status='active'");
-    $stmt->execute([$text]);
+    savedata('clear', 'reseller_user_id', $text);
+    sendmessage($from_id, 'نام نمایشی ریسلر را ارسال کنید. برای بدون نام، 0 را ارسال کنید.', $backadmin, 'HTML');
+    step('reseller_add_display_name', $from_id);
+}
+if ($user['step'] == 'reseller_add_display_name') {
+    $data = json_decode($user['Processing_value'], true);
+    $resellerUserId = $data['reseller_user_id'] ?? null;
+    if (!preg_match('/^\d+$/', (string)$resellerUserId)) {
+        sendmessage($from_id, '❌ آیدی ریسلر معتبر نیست. دوباره از ابتدا تلاش کنید.', $resellerkeyboard, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    $displayName = trim($text);
+    if ($displayName === '0' || $displayName === '') {
+        $displayName = null;
+    }
+    $stmt = $pdo->prepare("INSERT INTO resellers (user_id,display_name,status) VALUES (?, ?, 'active') ON DUPLICATE KEY UPDATE display_name=VALUES(display_name), status='active'");
+    $stmt->execute([$resellerUserId, $displayName]);
     sendmessage($from_id, 'ریسلر با موفقیت ذخیره شد', $resellerkeyboard, 'HTML');
     step('home', $from_id);
 }
@@ -2502,11 +2636,62 @@ if ($user['step'] == 'reseller_remove_user') {
     step('home', $from_id);
 }
 if ($text == $textbotlang['Admin']['reseller']['list']) {
-    $active = select("resellers", "user_id", "status", "active", "fetchAll");
-    $inactive = select("resellers", "user_id", "status", "inactive", "fetchAll");
-    $active_list = empty($active) ? "ندارد" : implode("\n", array_column($active, "user_id"));
-    $inactive_list = empty($inactive) ? "ندارد" : implode("\n", array_column($inactive, "user_id"));
-    sendmessage($from_id, "✅ ریسلرهای فعال:\n{$active_list}\n\n⛔ ریسلرهای غیرفعال:\n{$inactive_list}", $resellerkeyboard, 'HTML');
+    $stmt = $pdo->prepare("SELECT user_id, display_name, status FROM resellers WHERE status=? ORDER BY user_id ASC");
+    $stmt->execute(['active']);
+    $active = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $stmt->execute(['inactive']);
+    $inactive = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $formatResellerList = function ($rows) {
+        if (empty($rows)) return 'ندارد';
+        return implode("\n", array_map(function ($row) {
+            $displayName = htmlspecialchars(getResellerDisplayName($row), ENT_QUOTES, 'UTF-8');
+            $userId = htmlspecialchars((string)$row['user_id'], ENT_QUOTES, 'UTF-8');
+            $status = htmlspecialchars((string)$row['status'], ENT_QUOTES, 'UTF-8');
+            return "{$displayName} — {$userId} — {$status}";
+        }, $rows));
+    };
+    $active_list = $formatResellerList($active);
+    $inactive_list = $formatResellerList($inactive);
+    sendmessage($from_id, "✅ ریسلرهای فعال:
+{$active_list}
+
+⛔ ریسلرهای غیرفعال:
+{$inactive_list}", $resellerkeyboard, 'HTML');
+    step('home', $from_id);
+}
+if ($text == $textbotlang['Admin']['reseller']['edit_display_name']) {
+    sendmessage($from_id, 'آیدی عددی ریسلر را برای ویرایش نام ارسال کنید.', $backadmin, 'HTML');
+    step('reseller_edit_display_name_id', $from_id);
+}
+if ($user['step'] == 'reseller_edit_display_name_id') {
+    if (!preg_match('/^\d+$/', $text)) {
+        sendmessage($from_id, '❌ آیدی باید عددی باشد.', $backadmin, 'HTML');
+        return;
+    }
+    $reseller = getResellerByUserId($text);
+    if (empty($reseller)) {
+        sendmessage($from_id, '❌ ریسلر پیدا نشد.', $backadmin, 'HTML');
+        return;
+    }
+    savedata('clear', 'reseller_user_id', $text);
+    sendmessage($from_id, 'نام نمایشی جدید ریسلر را ارسال کنید. برای بدون نام، 0 را ارسال کنید.', $backadmin, 'HTML');
+    step('reseller_edit_display_name_value', $from_id);
+}
+if ($user['step'] == 'reseller_edit_display_name_value') {
+    $data = json_decode($user['Processing_value'], true);
+    $resellerUserId = $data['reseller_user_id'] ?? null;
+    if (!preg_match('/^\d+$/', (string)$resellerUserId)) {
+        sendmessage($from_id, '❌ آیدی ریسلر معتبر نیست. دوباره از ابتدا تلاش کنید.', $resellerkeyboard, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    $displayName = trim($text);
+    if ($displayName === '0' || $displayName === '') {
+        $displayName = null;
+    }
+    $stmt = $pdo->prepare("UPDATE resellers SET display_name=? WHERE user_id=?");
+    $stmt->execute([$displayName, $resellerUserId]);
+    sendmessage($from_id, '✅ نام نمایشی ریسلر بروزرسانی شد.', $resellerkeyboard, 'HTML');
     step('home', $from_id);
 }
 if ($text == $textbotlang['Admin']['reseller']['setextra']) {
@@ -2649,7 +2834,7 @@ if ($text == $textbotlang['Admin']['reseller']['products']) {
         return;
     }
     $ik = ['inline_keyboard' => []];
-    foreach (array_slice($rows, 0, 10) as $row) $ik['inline_keyboard'][] = [[ 'text' => $row['user_id'], 'callback_data' => "reseller_products_user_{$row['user_id']}" ]];
+    foreach (array_slice($rows, 0, 10) as $row) $ik['inline_keyboard'][] = [[ 'text' => formatResellerSelectionLabel($row), 'callback_data' => "reseller_products_user_{$row['user_id']}" ]];
     sendmessage($from_id, $textbotlang['Admin']['reseller']['select_reseller'], json_encode($ik), 'HTML');
 }
 if (preg_match('/^reseller_products_user_(\d+)$/', $datain, $m)) {
