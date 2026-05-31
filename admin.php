@@ -18,16 +18,52 @@ if (!isAdminUser($from_id)) {
     return;
 }
 $admin_ids = array_map("strval", $admin_ids);
+ensureMaintenanceSettingsSchema();
 if ($text == $textbotlang['Admin']['keyboardadmin']['toggle_bot_status']) {
     if (!isMainAdmin($from_id)) {
-        sendmessage($from_id, '❌ فقط ادمین اصلی می‌تواند وضعیت ربات را تغییر دهد.', $keyboardadmin, 'HTML');
+        sendmessage($from_id, $textbotlang['Admin']['maintenance']['main_admin_only'], $keyboardadmin, 'HTML');
         return;
     }
-    $currentStatus = (string)($setting['Bot_Status'] ?? '1');
-    $newStatus = $currentStatus === '1' ? '0' : '1';
-    update("setting", "Bot_Status", $newStatus);
-    $statusText = $newStatus === '1' ? 'روشن' : 'خاموش';
-    sendmessage($from_id, "✅ ربات با موفقیت {$statusText} شد.", $keyboardadmin, 'HTML');
+    $maintenanceSettings = getMaintenanceSettings();
+    $newEnabled = ($maintenanceSettings['maintenance_mode'] ?? 'off') !== 'on';
+    setMaintenanceMode($newEnabled);
+    $statusText = $newEnabled ? $textbotlang['Admin']['maintenance']['status_off'] : $textbotlang['Admin']['maintenance']['status_on'];
+    sendmessage($from_id, sprintf($textbotlang['Admin']['maintenance']['toggle_success'], $statusText), $keyboardadmin, 'HTML');
+    $setting = select("setting", "*");
+    return;
+}
+if ($text == $textbotlang['Admin']['keyboardadmin']['set_maintenance_message']) {
+    if (!isMainAdmin($from_id)) {
+        sendmessage($from_id, $textbotlang['Admin']['maintenance']['main_admin_only'], $keyboardadmin, 'HTML');
+        return;
+    }
+    sendmessage($from_id, $textbotlang['Admin']['maintenance']['message_prompt'], $backadmin, 'HTML');
+    step('set_maintenance_message', $from_id);
+    return;
+}
+if ($user['step'] == 'set_maintenance_message') {
+    if (!isMainAdmin($from_id)) {
+        step('home', $from_id);
+        sendmessage($from_id, $textbotlang['Admin']['maintenance']['main_admin_only'], $keyboardadmin, 'HTML');
+        return;
+    }
+    $maintenanceMessage = trim((string)$text);
+    if ($maintenanceMessage === '') {
+        sendmessage($from_id, $textbotlang['Admin']['maintenance']['message_empty'], $backadmin, 'HTML');
+        return;
+    }
+    setMaintenanceMessage($maintenanceMessage);
+    step('home', $from_id);
+    sendmessage($from_id, $textbotlang['Admin']['maintenance']['message_saved'], $keyboardadmin, 'HTML');
+    return;
+}
+if ($text == $textbotlang['Admin']['keyboardadmin']['delete_maintenance_message']) {
+    if (!isMainAdmin($from_id)) {
+        sendmessage($from_id, $textbotlang['Admin']['maintenance']['main_admin_only'], $keyboardadmin, 'HTML');
+        return;
+    }
+    deleteMaintenanceMessage();
+    sendmessage($from_id, $textbotlang['Admin']['maintenance']['message_deleted'], $keyboardadmin, 'HTML');
     return;
 }
 if (in_array($text, $textadmin) || in_array(mb_strtolower(trim((string)$text)), ["ادمین","پنل مدیریت","panel","/panel"]) || $datain == "PANEL") {
@@ -2300,12 +2336,16 @@ if ($text == $textbotlang['users']['status']['manageService']) {
     $type = $dataget[1];
     $value = $dataget[2];
     if ($type == "statusbot") {
+        if (!isMainAdmin($from_id)) {
+            sendmessage($from_id, $textbotlang['Admin']['maintenance']['main_admin_only'], $keyboardadmin, 'HTML');
+            return;
+        }
         if ($value == "1") {
             $valuenew = "0";
         } else {
             $valuenew = "1";
         }
-        update("setting", "Bot_Status", $valuenew);
+        setMaintenanceMode($valuenew === "0");
     } elseif ($type == "roll_Status") {
         if ($value == "1") {
             $valuenew = "0";

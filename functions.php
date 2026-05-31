@@ -22,6 +22,71 @@ function ActiveVoucher($ev_number, $ev_code)
     $voucher = file_get_contents("https://perfectmoney.com/acct/ev_activate.asp?AccountID=" . $AccountID . "&PassPhrase=" . $PassPhrase . "&Payee_Account=" . $Payer_Account . "&ev_number=" . $ev_number . "&ev_code=" . $ev_code);
     return $voucher;
 }
+
+function ensureMaintenanceSettingsSchema()
+{
+    global $pdo;
+    static $checked = false;
+    if ($checked || !isset($pdo)) {
+        return;
+    }
+
+    $checked = true;
+    $stmt = $pdo->prepare("SHOW COLUMNS FROM setting LIKE 'maintenance_mode'");
+    $stmt->execute();
+    if (!$stmt->fetch(PDO::FETCH_ASSOC)) {
+        $pdo->exec("ALTER TABLE setting ADD COLUMN maintenance_mode VARCHAR(20) NOT NULL DEFAULT 'off'");
+        $pdo->exec("UPDATE setting SET maintenance_mode = CASE WHEN Bot_Status = '0' THEN 'on' ELSE 'off' END");
+    }
+
+    $stmt = $pdo->prepare("SHOW COLUMNS FROM setting LIKE 'maintenance_message'");
+    $stmt->execute();
+    if (!$stmt->fetch(PDO::FETCH_ASSOC)) {
+        $pdo->exec("ALTER TABLE setting ADD COLUMN maintenance_message TEXT NULL");
+    }
+}
+
+function getMaintenanceSettings()
+{
+    ensureMaintenanceSettingsSchema();
+    $setting = select("setting", "*");
+    if (!$setting) {
+        return [
+            'maintenance_mode' => 'off',
+            'maintenance_message' => null,
+        ];
+    }
+
+    $mode = $setting['maintenance_mode'] ?? null;
+    if ($mode !== 'on' && $mode !== 'off') {
+        $mode = (($setting['Bot_Status'] ?? '1') === '0') ? 'on' : 'off';
+    }
+
+    return [
+        'maintenance_mode' => $mode,
+        'maintenance_message' => $setting['maintenance_message'] ?? null,
+    ];
+}
+
+function setMaintenanceMode($enabled)
+{
+    ensureMaintenanceSettingsSchema();
+    $mode = $enabled ? 'on' : 'off';
+    update("setting", "maintenance_mode", $mode);
+    update("setting", "Bot_Status", $enabled ? "0" : "1");
+}
+
+function setMaintenanceMessage($message)
+{
+    ensureMaintenanceSettingsSchema();
+    update("setting", "maintenance_message", $message);
+}
+
+function deleteMaintenanceMessage()
+{
+    setMaintenanceMessage(null);
+}
+
 function update($table, $field, $newValue, $whereField = null, $whereValue = null)
 {
     global $pdo, $user;
@@ -253,6 +318,151 @@ function getResellerProductById($id)
     $stmt->execute([':id' => $id]);
     return $stmt->fetch(PDO::FETCH_ASSOC);
 }
+
+function getActiveResellerProductsForUser($userId)
+{
+    global $pdo;
+    $stmt = $pdo->prepare("SELECT * FROM reseller_products WHERE reseller_user_id = :uid AND status = 'active' ORDER BY id DESC");
+    $stmt->execute([':uid' => $userId]);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function getActiveResellerProductForUser($userId, $productId)
+{
+    global $pdo;
+    $stmt = $pdo->prepare("SELECT * FROM reseller_products WHERE id = :id AND reseller_user_id = :uid AND status = 'active' LIMIT 1");
+    $stmt->execute([
+        ':id' => $productId,
+        ':uid' => $userId,
+    ]);
+    return $stmt->fetch(PDO::FETCH_ASSOC);
+}
+
+function buildResellerBuyKeyboard($userId)
+{
+    $products = getActiveResellerProductsForUser($userId);
+    $keyboard = ['inline_keyboard' => []];
+    foreach ($products as $product) {
+        $label = sprintf(
+            '%s | %s تومان | %s گیگ | %s روز',
+            $product['name_product'],
+            number_format((float)$product['price_product'], 0),
+            $product['Volume_constraint'],
+            $product['Service_time']
+        );
+        $keyboard['inline_keyboard'][] = [[
+            'text' => mb_substr($label, 0, 64),
+            'callback_data' => 'reseller_buy_product_' . $product['id'],
+        ]];
+    }
+    return json_encode($keyboard);
+}
+
+function buildResellerBuyDetailsKeyboard($productId)
+{
+    global $textbotlang;
+    return json_encode([
+        'inline_keyboard' => [
+            [['text' => $textbotlang['users']['buy']['reseller_confirm'], 'callback_data' => 'confirm_reseller_buy_' . $productId]],
+            [['text' => $textbotlang['users']['buy']['reseller_back'], 'callback_data' => 'reseller_buy_back']],
+        ],
+    ]);
+}
+
+function startResellerProductPurchase($userId, $productId, $customUsername = null)
+{
+    global $pdo, $textbotlang, $username, $usernameinvoice;
+
+    if (!isReseller($userId)) {
+        return ['status' => 'forbidden'];
+    }
+
+    $product = getActiveResellerProductForUser($userId, $productId);
+    if (!$product) {
+        return ['status' => 'not_found'];
+    }
+
+    $panel = select("marzban_panel", "*", "name_panel", $product['Location'], "select");
+    if (!$panel && $product['Location'] === '/all') {
+        $panel = select("marzban_panel", "*", "status", "activepanel", "select");
+    }
+    if (!$panel) {
+        return ['status' => 'panel_not_found'];
+    }
+
+    if ($panel['MethodUsername'] == $textbotlang['users']['customusername'] && $customUsername === null) {
+        return ['status' => 'need_username'];
+    }
+    if ($customUsername !== null && !preg_match('~(?!_)^[a-z][a-z\d_]{2,32}(?<!_)$~i', $customUsername)) {
+        return ['status' => 'invalid_username'];
+    }
+
+    $randomSuffix = bin2hex(random_bytes(2));
+    $username_ac = strtolower(generateUsername($userId, $panel['MethodUsername'], $username, $randomSuffix, (string)$customUsername));
+    if ($username_ac === '') {
+        $username_ac = strtolower('r' . $userId . $randomSuffix);
+    }
+    $existingInvoiceUsernames = is_array($usernameinvoice) ? $usernameinvoice : select("invoice", "username", null, null, "FETCH_COLUMN");
+    if (in_array($username_ac, $existingInvoiceUsernames, true)) {
+        $username_ac = random_int(1000000, 9999999) . $username_ac;
+    }
+
+    $date = time();
+    $invoiceId = bin2hex(random_bytes(4));
+    $status = 'unpaid';
+    $stmt = $pdo->prepare("INSERT IGNORE INTO invoice (id_user, id_invoice, username, time_sell, Service_location, name_product, price_product, Volume, Service_time, Status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $stmt->execute([
+        $userId,
+        $invoiceId,
+        $username_ac,
+        $date,
+        $panel['name_panel'],
+        $product['name_product'],
+        $product['price_product'],
+        $product['Volume_constraint'],
+        $product['Service_time'],
+        $status,
+    ]);
+
+    $userRow = select("user", "*", "id", $userId, "select");
+    $price = (int)$product['price_product'];
+    $balance = (int)($userRow['Balance'] ?? 0);
+    update("user", "Processing_value_one", $username_ac, "id", $userId);
+    update("user", "Processing_value_tow", "getconfigafterpay", "id", $userId);
+
+    if ($price > $balance) {
+        update("user", "Processing_value", $price - $balance, "id", $userId);
+        return [
+            'status' => 'need_payment',
+            'amount' => $price - $balance,
+            'invoice_id' => $invoiceId,
+            'username' => $username_ac,
+        ];
+    }
+
+    $orderId = bin2hex(random_bytes(5));
+    $paymentStatus = 'paid';
+    $paymentMethod = 'wallet';
+    $invoiceRef = "getconfigafterpay|{$username_ac}";
+    $paymentTime = date('Y/m/d H:i:s');
+    $stmt = $pdo->prepare("INSERT INTO Payment_report (id_user, id_order, time, price, payment_Status, Payment_Method, invoice) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    $stmt->execute([
+        $userId,
+        $orderId,
+        $paymentTime,
+        $price,
+        $paymentStatus,
+        $paymentMethod,
+        $invoiceRef,
+    ]);
+    DirectPayment($orderId);
+    return [
+        'status' => 'created',
+        'invoice_id' => $invoiceId,
+        'username' => $username_ac,
+    ];
+}
+
 function buildResellerProductsKeyboard($resellerUserId, $page = 1)
 {
     global $pdo;

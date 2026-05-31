@@ -44,6 +44,78 @@ link_mirza_command() {
     ln -sf "$SCRIPT_DIR/install.sh" /usr/local/bin/mirza
 }
 
+
+# Ask whether to use existing SSL files or request a new certificate with Certbot.
+prompt_ssl_certificate_source() {
+    SSL_MODE="certbot"
+    SSL_FULLCHAIN_PATH=""
+    SSL_PRIVKEY_PATH=""
+
+    local use_existing_ssl retry_choice
+    read -p "Do you already have SSL certificate files? [y/N] " use_existing_ssl
+    case "$use_existing_ssl" in
+        [Yy]|[Yy][Ee][Ss])
+            while true; do
+                read -r -p "Enter fullchain.pem path: " SSL_FULLCHAIN_PATH
+                read -r -p "Enter privkey.pem path: " SSL_PRIVKEY_PATH
+
+                if [[ -f "$SSL_FULLCHAIN_PATH" && -r "$SSL_FULLCHAIN_PATH" && -f "$SSL_PRIVKEY_PATH" && -r "$SSL_PRIVKEY_PATH" ]]; then
+                    SSL_MODE="existing"
+                    return 0
+                fi
+
+                echo -e "\e[91mInvalid SSL file path(s). Both files must exist and be readable.\033[0m"
+                read -p "Try entering SSL paths again? [Y/n] " retry_choice
+                case "$retry_choice" in
+                    [Nn]|[Nn][Oo])
+                        echo -e "\e[93mFalling back to Certbot SSL setup.\033[0m"
+                        SSL_MODE="certbot"
+                        SSL_FULLCHAIN_PATH=""
+                        SSL_PRIVKEY_PATH=""
+                        return 0
+                        ;;
+                esac
+            done
+            ;;
+        *)
+            SSL_MODE="certbot"
+            return 0
+            ;;
+    esac
+}
+
+# Write an Apache SSL VirtualHost with the selected certificate files.
+configure_apache_ssl_vhost() {
+    local domain_name="$1"
+    local ssl_port="$2"
+    local fullchain_path="$3"
+    local privkey_path="$4"
+    local apache_config="$5"
+    local document_root="$6"
+
+    sudo bash -c "echo -n > '$apache_config'" || {
+        echo -e "\e[91mError: Failed to clear SSL VirtualHost configuration.\033[0m"
+        return 1
+    }
+
+    cat <<EOF | sudo tee "$apache_config"
+<IfModule mod_ssl.c>
+<VirtualHost *:$ssl_port>
+    ServerAdmin webmaster@localhost
+    ServerName $domain_name
+    DocumentRoot $document_root
+    ErrorLog \${APACHE_LOG_DIR}/error.log
+    CustomLog \${APACHE_LOG_DIR}/access.log combined
+    SSLEngine on
+    SSLCertificateFile $fullchain_path
+    SSLCertificateKeyFile $privkey_path
+    SSLProtocol all -SSLv2 -SSLv3 -TLSv1 -TLSv1.1
+    SSLCipherSuite HIGH:!aNULL:!MD5
+</VirtualHost>
+</IfModule>
+EOF
+}
+
 # Check SSL certificate status and days remaining
 check_ssl_status() {
     # First get domain from config file
@@ -547,6 +619,8 @@ while [[ ! "$domainname" =~ ^[a-zA-Z0-9.-]+$ ]]; do
 done
     DOMAIN_NAME="$domainname"
     PATHS=$(cat /root/confmirza/dbrootmirza.txt | grep '$path' | cut -d"'" -f2)
+    prompt_ssl_certificate_source
+
     sudo ufw allow 80 || {
         echo -e "\e[91mError: Failed to allow port 80 in UFW.\033[0m"
         exit 1
@@ -556,35 +630,58 @@ done
         exit 1
     }
 
-    echo -e "\033[33mDisable apache2\033[0m"
-    wait
+    if [[ "$SSL_MODE" == "certbot" ]]; then
+        echo -e "\033[33mDisable apache2\033[0m"
+        wait
 
-    sudo systemctl stop apache2 || {
-        echo -e "\e[91mError: Failed to stop Apache2.\033[0m"
+        sudo systemctl stop apache2 || {
+            echo -e "\e[91mError: Failed to stop Apache2.\033[0m"
+            exit 1
+        }
+        sudo systemctl disable apache2 || {
+            echo -e "\e[91mError: Failed to disable Apache2.\033[0m"
+            exit 1
+        }
+        sudo apt install letsencrypt -y || {
+            echo -e "\e[91mError: Failed to install letsencrypt.\033[0m"
+            exit 1
+        }
+        sudo systemctl enable certbot.timer || {
+            echo -e "\e[91mError: Failed to enable certbot timer.\033[0m"
+            exit 1
+        }
+        sudo certbot certonly --standalone --agree-tos --preferred-challenges http -d "$DOMAIN_NAME" || {
+            echo -e "\e[91mError: Failed to generate SSL certificate.\033[0m"
+            exit 1
+        }
+        sudo apt install python3-certbot-apache -y || {
+            echo -e "\e[91mError: Failed to install python3-certbot-apache.\033[0m"
+            exit 1
+        }
+        sudo certbot --apache --agree-tos --preferred-challenges http -d "$DOMAIN_NAME" || {
+            echo -e "\e[91mError: Failed to configure SSL with Certbot.\033[0m"
+            exit 1
+        }
+        SSL_FULLCHAIN_PATH="/etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem"
+        SSL_PRIVKEY_PATH="/etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem"
+    else
+        echo -e "\e[92mUsing existing SSL certificate files. Certbot will not be run.\033[0m"
+    fi
+
+    configure_apache_ssl_vhost "$DOMAIN_NAME" "443" "$SSL_FULLCHAIN_PATH" "$SSL_PRIVKEY_PATH" "/etc/apache2/sites-available/000-default-le-ssl.conf" "/var/www/html" || {
+        echo -e "\e[91mError: Failed to create SSL VirtualHost configuration.\033[0m"
         exit 1
     }
-    sudo systemctl disable apache2 || {
-        echo -e "\e[91mError: Failed to disable Apache2.\033[0m"
+    sudo a2enmod ssl || {
+        echo -e "\e[91mError: Failed to enable SSL module.\033[0m"
         exit 1
     }
-    sudo apt install letsencrypt -y || {
-        echo -e "\e[91mError: Failed to install letsencrypt.\033[0m"
+    sudo a2ensite 000-default-le-ssl.conf || {
+        echo -e "\e[91mError: Failed to enable SSL site.\033[0m"
         exit 1
     }
-    sudo systemctl enable certbot.timer || {
-        echo -e "\e[91mError: Failed to enable certbot timer.\033[0m"
-        exit 1
-    }
-    sudo certbot certonly --standalone --agree-tos --preferred-challenges http -d $DOMAIN_NAME || {
-        echo -e "\e[91mError: Failed to generate SSL certificate.\033[0m"
-        exit 1
-    }
-    sudo apt install python3-certbot-apache -y || {
-        echo -e "\e[91mError: Failed to install python3-certbot-apache.\033[0m"
-        exit 1
-    }
-    sudo certbot --apache --agree-tos --preferred-challenges http -d $DOMAIN_NAME || {
-        echo -e "\e[91mError: Failed to configure SSL with Certbot.\033[0m"
+    sudo apache2ctl configtest || {
+        echo -e "\e[91mError: Apache configuration test failed after SSL configuration.\033[0m"
         exit 1
     }
 
@@ -595,8 +692,8 @@ done
         echo -e "\e[91mError: Failed to enable Apache2.\033[0m"
         exit 1
     }
-    sudo systemctl start apache2 || {
-        echo -e "\e[91mError: Failed to start Apache2.\033[0m"
+    sudo systemctl restart apache2 || {
+        echo -e "\e[91mError: Failed to restart Apache2.\033[0m"
         exit 1
     }
             clear
@@ -889,14 +986,6 @@ function install_bot_with_marzban() {
         exit 1
     }
 
-    sudo apt install -y python3-certbot-apache || {
-        echo -e "\e[91mError: Failed to install Certbot for Apache.\033[0m"
-        exit 1
-    }
-    sudo systemctl enable certbot.timer || {
-        echo -e "\e[91mError: Failed to enable certbot timer.\033[0m"
-        exit 1
-    }
 
     # Install UFW if not present
     if ! dpkg -s ufw &>/dev/null; then
@@ -1124,37 +1213,36 @@ EOF
     DOMAIN_NAME="$domainname"
     echo -e "\e[92mDomain set to: $DOMAIN_NAME\033[0m"
 
-    sudo systemctl restart apache2 || {
-        echo -e "\e[91mError: Failed to restart Apache2 before Certbot.\033[0m"
-        exit 1
-    }
-    sudo certbot --apache --agree-tos --preferred-challenges http -d "$DOMAIN_NAME" --https-port 88 --no-redirect || {
-        echo -e "\e[91mError: Failed to configure SSL with Certbot on port 88.\033[0m"
-        exit 1
-    }
+    prompt_ssl_certificate_source
 
-    # Ensure SSL VirtualHost uses port 88 with correct settings
-    sudo bash -c "echo -n > /etc/apache2/sites-available/000-default-le-ssl.conf"  # Clear any existing file
-    cat <<EOF | sudo tee /etc/apache2/sites-available/000-default-le-ssl.conf
-<IfModule mod_ssl.c>
-<VirtualHost *:88>
-    ServerAdmin webmaster@localhost
-    ServerName $DOMAIN_NAME
-    DocumentRoot /var/www/html
-    ErrorLog \${APACHE_LOG_DIR}/error.log
-    CustomLog \${APACHE_LOG_DIR}/access.log combined
-    SSLEngine on
-    SSLCertificateFile /etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem
-    SSLCertificateKeyFile /etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem
-    SSLProtocol all -SSLv2 -SSLv3 -TLSv1 -TLSv1.1
-    SSLCipherSuite HIGH:!aNULL:!MD5
-</VirtualHost>
-</IfModule>
-EOF
-    if [ $? -ne 0 ]; then
+    if [[ "$SSL_MODE" == "certbot" ]]; then
+        sudo apt install -y python3-certbot-apache || {
+            echo -e "\e[91mError: Failed to install Certbot for Apache.\033[0m"
+            exit 1
+        }
+        sudo systemctl enable certbot.timer || {
+            echo -e "\e[91mError: Failed to enable certbot timer.\033[0m"
+            exit 1
+        }
+        sudo systemctl restart apache2 || {
+            echo -e "\e[91mError: Failed to restart Apache2 before Certbot.\033[0m"
+            exit 1
+        }
+        sudo certbot --apache --agree-tos --preferred-challenges http -d "$DOMAIN_NAME" --https-port 88 --no-redirect || {
+            echo -e "\e[91mError: Failed to configure SSL with Certbot on port 88.\033[0m"
+            exit 1
+        }
+        SSL_FULLCHAIN_PATH="/etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem"
+        SSL_PRIVKEY_PATH="/etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem"
+    else
+        echo -e "\e[92mUsing existing SSL certificate files. Certbot will not be run.\033[0m"
+    fi
+
+    # Ensure SSL VirtualHost uses port 88 with the selected certificate files
+    configure_apache_ssl_vhost "$DOMAIN_NAME" "88" "$SSL_FULLCHAIN_PATH" "$SSL_PRIVKEY_PATH" "/etc/apache2/sites-available/000-default-le-ssl.conf" "/var/www/html" || {
         echo -e "\e[91mError: Failed to create SSL VirtualHost configuration.\033[0m"
         exit 1
-    fi
+    }
     sudo a2enmod ssl || {
         echo -e "\e[91mError: Failed to enable SSL module.\033[0m"
         exit 1
@@ -2014,20 +2102,28 @@ function install_additional_bot() {
         fi
     done
 
-    # Stop Apache to free port 80
-    echo -e "\033[33mStopping Apache to free port 80...\033[0m"
-    sudo systemctl stop apache2
+    prompt_ssl_certificate_source
 
-    # Obtain SSL Certificate
-    echo -e "\033[33mObtaining SSL certificate...\033[0m"
-    sudo certbot certonly --standalone --agree-tos --preferred-challenges http -d "$DOMAIN_NAME" || {
-        echo -e "\033[31mError obtaining SSL certificate.\033[0m"
-        return 1
-    }
+    if [[ "$SSL_MODE" == "certbot" ]]; then
+        # Stop Apache to free port 80
+        echo -e "\033[33mStopping Apache to free port 80...\033[0m"
+        sudo systemctl stop apache2
 
-    # Restart Apache
-    echo -e "\033[33mRestarting Apache...\033[0m"
-    sudo systemctl start apache2
+        # Obtain SSL Certificate
+        echo -e "\033[33mObtaining SSL certificate...\033[0m"
+        sudo certbot certonly --standalone --agree-tos --preferred-challenges http -d "$DOMAIN_NAME" || {
+            echo -e "\033[31mError obtaining SSL certificate.\033[0m"
+            return 1
+        }
+        SSL_FULLCHAIN_PATH="/etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem"
+        SSL_PRIVKEY_PATH="/etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem"
+
+        # Restart Apache
+        echo -e "\033[33mRestarting Apache...\033[0m"
+        sudo systemctl start apache2
+    else
+        echo -e "\033[32mUsing existing SSL certificate files. Certbot will not be run.\033[0m"
+    fi
 
     # Configure Apache for new domain
     APACHE_CONFIG="/etc/apache2/sites-available/$DOMAIN_NAME.conf"
@@ -2048,8 +2144,8 @@ function install_additional_bot() {
     DocumentRoot /var/www/html/$BOT_NAME
 
     SSLEngine on
-    SSLCertificateFile /etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem
-    SSLCertificateKeyFile /etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem
+    SSLCertificateFile $SSL_FULLCHAIN_PATH
+    SSLCertificateKeyFile $SSL_PRIVKEY_PATH
 </VirtualHost>
 EOF"
 

@@ -142,7 +142,9 @@ try {
         status_verify varchar(50)  NULL,
         removedayc varchar(100)  NULL,
         copy_cart varchar(20)  NULL,
-        statuscategory varchar(100)  NULL)
+        statuscategory varchar(100)  NULL,
+        maintenance_mode varchar(20) NOT NULL DEFAULT 'off',
+        maintenance_message TEXT NULL)
         ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin");
         if (!$result) {
             echo "table setting".mysqli_error($connect);
@@ -152,7 +154,7 @@ try {
         $active_phone_text = "0";
         $active_phone_iran_text = "0";
         $active_help = "0";
-$connect->query("INSERT INTO setting (Bot_Status,roll_Status,get_number,limit_usertest_all,time_usertest,val_usertest,help_Status,iran_number,NotUser,namecustome,removedayc,status_verify,statuscategory,copy_cart) VALUES ('$active_bot_text','$active_roll_text','$active_phone_text','1','1','100','$active_help','$active_phone_iran_text','0','0','1','0','1','0')");
+$connect->query("INSERT INTO setting (Bot_Status,roll_Status,get_number,limit_usertest_all,time_usertest,val_usertest,help_Status,iran_number,NotUser,namecustome,removedayc,status_verify,statuscategory,copy_cart,maintenance_mode,maintenance_message) VALUES ('$active_bot_text','$active_roll_text','$active_phone_text','1','1','100','$active_help','$active_phone_iran_text','0','0','1','0','1','0','off',NULL)");
     } else {
         addFieldToTable($tableName, 'copy_cart', '0',"VARCHAR(20)");
         addFieldToTable($tableName, 'status_verify', '0',"VARCHAR(50)");
@@ -160,6 +162,9 @@ $connect->query("INSERT INTO setting (Bot_Status,roll_Status,get_number,limit_us
         addFieldToTable($tableName, 'namecustome', '0',"VARCHAR(200)");
         addFieldToTable($tableName, 'removedayc', '1',"VARCHAR(100)");
         addFieldToTable($tableName, 'Extra_volume', '0',"VARCHAR(200)");
+        addFieldToTable($tableName, 'maintenance_mode', 'off',"VARCHAR(20) NOT NULL DEFAULT 'off'");
+        addFieldToTable($tableName, 'maintenance_message', null,"TEXT NULL");
+        $connect->query("UPDATE setting SET maintenance_mode = CASE WHEN Bot_Status = '0' THEN 'on' ELSE maintenance_mode END WHERE maintenance_mode IS NULL OR maintenance_mode = 'off'");
         $settingsql = mysqli_fetch_assoc(mysqli_query($connect, "SELECT * FROM setting"));
         $active_phone_iran_text = "0";
         if(!isset($settingsql['iran_number'])){
