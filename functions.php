@@ -369,98 +369,378 @@ function buildResellerBuyDetailsKeyboard($productId)
     ]);
 }
 
-function startResellerProductPurchase($userId, $productId, $customUsername = null)
+function resolveResellerProductPanel(array $product, $selectedPanelName = null)
 {
-    global $pdo, $textbotlang, $username, $usernameinvoice;
+    global $pdo;
 
-    if (!isReseller($userId)) {
-        return ['status' => 'forbidden'];
+    $location = (string)($product['Location'] ?? '');
+    if ($selectedPanelName !== null && $selectedPanelName !== '') {
+        $panel = select("marzban_panel", "*", "name_panel", $selectedPanelName, "select");
+        if (!$panel) {
+            return ['status' => 'panel_not_found'];
+        }
+        if ($location !== '/all' && $panel['name_panel'] !== $location) {
+            return ['status' => 'panel_not_allowed'];
+        }
+        return ['status' => 'ok', 'panel' => $panel];
     }
 
-    $product = getActiveResellerProductForUser($userId, $productId);
-    if (!$product) {
-        return ['status' => 'not_found'];
+    if ($location === '/all') {
+        $stmt = $pdo->prepare("SELECT * FROM marzban_panel WHERE status = 'activepanel' ORDER BY id ASC");
+        $stmt->execute();
+        $panels = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if (count($panels) === 0) {
+            return ['status' => 'panel_not_found'];
+        }
+        if (count($panels) > 1) {
+            return ['status' => 'need_panel', 'panels' => $panels];
+        }
+        return ['status' => 'ok', 'panel' => $panels[0]];
     }
 
-    $panel = select("marzban_panel", "*", "name_panel", $product['Location'], "select");
-    if (!$panel && $product['Location'] === '/all') {
-        $panel = select("marzban_panel", "*", "status", "activepanel", "select");
-    }
+    $panel = select("marzban_panel", "*", "name_panel", $location, "select");
     if (!$panel) {
         return ['status' => 'panel_not_found'];
     }
+    return ['status' => 'ok', 'panel' => $panel];
+}
 
-    if ($panel['MethodUsername'] == $textbotlang['users']['customusername'] && $customUsername === null) {
-        return ['status' => 'need_username'];
+function validateResellerPurchasePanel(array $panel)
+{
+    if (($panel['status'] ?? '') !== 'activepanel') {
+        return ['status' => 'panel_inactive'];
     }
+    if (empty($panel['MethodUsername'])) {
+        return ['status' => 'panel_config_incomplete', 'reason' => 'MethodUsername'];
+    }
+
+    $type = (string)($panel['type'] ?? '');
+    if (in_array($type, ['x-ui_single', 'alireza', 'mikrotik'], true) && empty($panel['inboundid'])) {
+        return ['status' => 'panel_config_incomplete', 'reason' => 'inboundid'];
+    }
+    if (in_array($type, ['x-ui_single', 'alireza'], true) && empty($panel['linksubx'])) {
+        return ['status' => 'panel_config_incomplete', 'reason' => 'linksubx'];
+    }
+    if ($type === 's_ui') {
+        $proxies = json_decode((string)($panel['proxies'] ?? ''), true);
+        if (empty($panel['proxies']) || json_last_error() !== JSON_ERROR_NONE || empty($proxies)) {
+            return ['status' => 'panel_config_incomplete', 'reason' => 'proxies'];
+        }
+    }
+
+    return ['status' => 'ok'];
+}
+
+function buildResellerPanelSelectionKeyboard($productId, array $panels)
+{
+    $keyboard = ['inline_keyboard' => []];
+    foreach ($panels as $panel) {
+        $keyboard['inline_keyboard'][] = [[
+            'text' => (string)$panel['name_panel'],
+            'callback_data' => 'reseller_select_panel_' . $productId . '_' . $panel['id'],
+        ]];
+    }
+    $keyboard['inline_keyboard'][] = [[
+        'text' => '🔙 بازگشت',
+        'callback_data' => 'reseller_buy_product_' . $productId,
+    ]];
+    return json_encode($keyboard);
+}
+
+function generateUniqueResellerUsername($userId, array $panel, $customUsername = null)
+{
+    global $username, $usernameinvoice, $ManagePanel, $textbotlang;
+
     if ($customUsername !== null && !preg_match('~(?!_)^[a-z][a-z\d_]{2,32}(?<!_)$~i', $customUsername)) {
         return ['status' => 'invalid_username'];
     }
 
-    $randomSuffix = bin2hex(random_bytes(2));
-    $username_ac = strtolower(generateUsername($userId, $panel['MethodUsername'], $username, $randomSuffix, (string)$customUsername));
-    if ($username_ac === '') {
-        $username_ac = strtolower('r' . $userId . $randomSuffix);
-    }
     $existingInvoiceUsernames = is_array($usernameinvoice) ? $usernameinvoice : select("invoice", "username", null, null, "FETCH_COLUMN");
-    if (in_array($username_ac, $existingInvoiceUsernames, true)) {
-        $username_ac = random_int(1000000, 9999999) . $username_ac;
+    $existingInvoiceUsernames = is_array($existingInvoiceUsernames) ? $existingInvoiceUsernames : [];
+    for ($attempt = 0; $attempt < 8; $attempt++) {
+        $randomSuffix = bin2hex(random_bytes(2));
+        $candidate = strtolower((string)generateUsername($userId, $panel['MethodUsername'], $username, $randomSuffix, (string)$customUsername));
+        if ($candidate === '') {
+            $candidate = strtolower('r' . $userId . '_' . $randomSuffix);
+        }
+        if ($attempt > 0 && $panel['MethodUsername'] == $textbotlang['users']['customusername']) {
+            $candidate .= '_' . $randomSuffix;
+        }
+        if (in_array($candidate, $existingInvoiceUsernames, true)) {
+            continue;
+        }
+        $panelUser = $ManagePanel->DataUser($panel['name_panel'], $candidate);
+        if (is_array($panelUser) && (($panelUser['status'] ?? '') !== 'Unsuccessful') && !empty($panelUser['username'])) {
+            continue;
+        }
+        return ['status' => 'ok', 'username' => $candidate];
     }
 
-    $date = time();
-    $invoiceId = bin2hex(random_bytes(4));
-    $status = 'unpaid';
-    $stmt = $pdo->prepare("INSERT IGNORE INTO invoice (id_user, id_invoice, username, time_sell, Service_location, name_product, price_product, Volume, Service_time, Status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    $stmt->execute([
-        $userId,
-        $invoiceId,
-        $username_ac,
-        $date,
-        $panel['name_panel'],
-        $product['name_product'],
-        $product['price_product'],
-        $product['Volume_constraint'],
-        $product['Service_time'],
-        $status,
+    return ['status' => 'username_duplicate'];
+}
+
+function resellerPurchaseErrorMessage($status, $reason = '')
+{
+    $messages = [
+        'not_found' => '❌ محصول ریسلر پیدا نشد',
+        'forbidden' => '❌ این محصول برای شما فعال نیست',
+        'inactive_product' => '❌ این محصول برای شما فعال نیست',
+        'panel_not_found' => '❌ پنل محصول پیدا نشد',
+        'panel_not_allowed' => '❌ پنل انتخاب‌شده برای این محصول مجاز نیست',
+        'panel_inactive' => '❌ پنل فعال نیست',
+        'panel_config_incomplete' => '❌ اینباند/تنظیمات پنل کامل نیست',
+        'insufficient_balance' => '❌ موجودی کافی نیست',
+        'create_failed' => '❌ خطا در ساخت سرویس در پنل',
+        'invalid_username' => '❌ نام کاربری وارد شده معتبر نیست',
+        'username_duplicate' => '❌ نام کاربری تکراری است، دوباره تلاش کنید',
+        'exception' => '❌ خطا در ساخت سرویس در پنل',
+    ];
+    $message = $messages[$status] ?? '❌ خطا در خرید محصول ریسلر';
+    if ($status === 'panel_config_incomplete' && $reason !== '') {
+        $message .= "\nجزئیات برای ادمین: <code>{$reason}</code>";
+    }
+    return $message;
+}
+
+function sendPurchasedServiceMessage($userId, array $invoice, array $panel, array $dataoutput)
+{
+    global $textbotlang, $keyboard;
+
+    $randomString = bin2hex(random_bytes(2));
+    $output_config_link = '';
+    $config = '';
+    $configqr = '';
+    $Shoppinginfo = json_encode([
+        'inline_keyboard' => [
+            [
+                ['text' => $textbotlang['users']['help']['btninlinebuy'], 'callback_data' => "helpbtn"],
+            ]
+        ]
     ]);
 
-    $userRow = select("user", "*", "id", $userId, "select");
-    $price = (int)$product['price_product'];
-    $balance = (int)($userRow['Balance'] ?? 0);
-    update("user", "Processing_value_one", $username_ac, "id", $userId);
-    update("user", "Processing_value_tow", "getconfigafterpay", "id", $userId);
+    if (($panel['sublink'] ?? '') == "onsublink") {
+        $output_config_link = $dataoutput['subscription_url'] ?? '';
+    }
+    if (($panel['configManual'] ?? '') == "onconfig" && !empty($dataoutput['configs']) && is_array($dataoutput['configs'])) {
+        foreach ($dataoutput['configs'] as $configs) {
+            $config .= "\n" . $configs;
+            $configqr .= $configs;
+        }
+    }
 
-    if ($price > $balance) {
-        update("user", "Processing_value", $price - $balance, "id", $userId);
+    if (($panel['type'] ?? '') == "wgdashboard") {
+        $textcreatuser = sprintf($textbotlang['users']['buy']['createservicewgbuy'], $dataoutput['username'], $invoice['name_product'], $panel['name_panel'], $invoice['Service_time'], $invoice['Volume']);
+    } elseif (($panel['type'] ?? '') == "mikrotik") {
+        $textcreatuser = sprintf($textbotlang['users']['buy']['createservice_mikrotik_buy'], $dataoutput['username'], $dataoutput['subscription_url'], $invoice['name_product'], $panel['name_panel'], $invoice['Service_time'], $invoice['Volume']);
+    } else {
+        $textcreatuser = sprintf($textbotlang['users']['buy']['createservice'], $dataoutput['username'], $invoice['name_product'], $panel['name_panel'], $invoice['Service_time'], $invoice['Volume'], $config, $output_config_link);
+    }
+
+    if (($panel['type'] ?? '') == "mikrotik") {
+        sendmessage($userId, $textcreatuser, $Shoppinginfo, 'HTML');
+        sendmessage($userId, $textbotlang['users']['selectoption'], $keyboard, 'HTML');
+        return;
+    }
+
+    if (($panel['sublink'] ?? '') == "onsublink" && $output_config_link !== '') {
+        $urlimage = "{$userId}{$randomString}.png";
+        $writer = new PngWriter();
+        $qrCode = QrCode::create($output_config_link)
+            ->setEncoding(new Encoding('UTF-8'))
+            ->setErrorCorrectionLevel(ErrorCorrectionLevel::Low)
+            ->setSize(400)
+            ->setMargin(0)
+            ->setRoundBlockSizeMode(RoundBlockSizeMode::Margin);
+        $result = $writer->write($qrCode, null, null);
+        $result->saveToFile($urlimage);
+        telegram('sendphoto', [
+            'chat_id' => $userId,
+            'photo' => new CURLFile($urlimage),
+            'reply_markup' => $Shoppinginfo,
+            'caption' => $textcreatuser,
+            'parse_mode' => "HTML",
+        ]);
+        if (($panel['type'] ?? '') == "wgdashboard") {
+            $urldocs = "{$panel['inboundid']}_{$invoice['id_invoice']}.conf";
+            file_put_contents($urldocs, $output_config_link);
+            sendDocument($userId, $urldocs, $textbotlang['users']['buy']['configwg']);
+            @unlink($urldocs);
+        }
+        @unlink($urlimage);
+    } elseif (($panel['configManual'] ?? '') == "onconfig" && !empty($dataoutput['configs']) && is_array($dataoutput['configs']) && count($dataoutput['configs']) == 1) {
+        $urlimage = "{$userId}{$randomString}.png";
+        $writer = new PngWriter();
+        $qrCode = QrCode::create($configqr)
+            ->setEncoding(new Encoding('UTF-8'))
+            ->setErrorCorrectionLevel(ErrorCorrectionLevel::Low)
+            ->setSize(400)
+            ->setMargin(0)
+            ->setRoundBlockSizeMode(RoundBlockSizeMode::Margin);
+        $result = $writer->write($qrCode, null, null);
+        $result->saveToFile($urlimage);
+        telegram('sendphoto', [
+            'chat_id' => $userId,
+            'photo' => new CURLFile($urlimage),
+            'reply_markup' => $Shoppinginfo,
+            'caption' => $textcreatuser,
+            'parse_mode' => "HTML",
+        ]);
+        @unlink($urlimage);
+    } else {
+        sendmessage($userId, $textcreatuser, $Shoppinginfo, 'HTML');
+    }
+    sendmessage($userId, $textbotlang['users']['selectoption'], $keyboard, 'HTML');
+}
+
+function startResellerProductPurchase($userId, $productId, $customUsername = null, $selectedPanelName = null)
+{
+    global $pdo, $ManagePanel;
+
+    try {
+        if (!isReseller($userId)) {
+            return ['status' => 'forbidden'];
+        }
+
+        $stmt = $pdo->prepare("SELECT * FROM reseller_products WHERE id = :id LIMIT 1");
+        $stmt->execute([':id' => $productId]);
+        $product = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$product) {
+            return ['status' => 'not_found'];
+        }
+        if ((string)$product['reseller_user_id'] !== (string)$userId || ($product['status'] ?? '') !== 'active') {
+            return ['status' => 'inactive_product'];
+        }
+
+        $resolved = resolveResellerProductPanel($product, $selectedPanelName);
+        if (($resolved['status'] ?? '') !== 'ok') {
+            return $resolved + ['product' => $product];
+        }
+        $panel = $resolved['panel'];
+
+        $panelValidation = validateResellerPurchasePanel($panel);
+        if (($panelValidation['status'] ?? '') !== 'ok') {
+            error_log('reseller_purchase panel_config_incomplete user=' . $userId . ' product=' . $productId . ' panel=' . ($panel['name_panel'] ?? '') . ' reason=' . ($panelValidation['reason'] ?? ''));
+            return $panelValidation;
+        }
+
+        $userRow = select("user", "*", "id", $userId, "select");
+        $price = (int)$product['price_product'];
+        $balance = (int)($userRow['Balance'] ?? 0);
+
+        $usernameResult = generateUniqueResellerUsername($userId, $panel, $customUsername);
+        if (($usernameResult['status'] ?? '') !== 'ok') {
+            return $usernameResult;
+        }
+        $username_ac = $usernameResult['username'];
+
+        $invoiceId = bin2hex(random_bytes(4));
+        $date = time();
+
+        if ($price > $balance) {
+            $status = 'unpaid';
+            $stmt = $pdo->prepare("INSERT INTO invoice (id_user, id_invoice, username, time_sell, Service_location, name_product, price_product, Volume, Service_time, Status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([
+                $userId,
+                $invoiceId,
+                $username_ac,
+                $date,
+                $panel['name_panel'],
+                $product['name_product'],
+                $product['price_product'],
+                $product['Volume_constraint'],
+                $product['Service_time'],
+                $status,
+            ]);
+            update("user", "Processing_value", $price - $balance, "id", $userId);
+            update("user", "Processing_value_one", $username_ac, "id", $userId);
+            update("user", "Processing_value_tow", "getconfigafterpay", "id", $userId);
+            return [
+                'status' => 'insufficient_balance',
+                'amount' => $price - $balance,
+                'price' => $price,
+                'balance' => $balance,
+                'invoice_id' => $invoiceId,
+                'username' => $username_ac,
+            ];
+        }
+
+        $status = 'creating';
+        $stmt = $pdo->prepare("INSERT INTO invoice (id_user, id_invoice, username, time_sell, Service_location, name_product, price_product, Volume, Service_time, Status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->execute([
+            $userId,
+            $invoiceId,
+            $username_ac,
+            $date,
+            $panel['name_panel'],
+            $product['name_product'],
+            $product['price_product'],
+            $product['Volume_constraint'],
+            $product['Service_time'],
+            $status,
+        ]);
+
+        if ((string)$product['Service_time'] === '0') {
+            $expire = 0;
+        } else {
+            $expire = strtotime(date("Y-m-d H:i:s", strtotime("+" . $product['Service_time'] . "days")));
+        }
+        $datac = [
+            'expire' => $expire,
+            'data_limit' => ((float)$product['Volume_constraint']) * pow(1024, 3),
+        ];
+        $dataoutput = $ManagePanel->createUser($panel['name_panel'], $username_ac, $datac);
+        if (empty($dataoutput['username'])) {
+            error_log('reseller_purchase createUser failed user=' . $userId . ' product=' . $productId . ' panel=' . $panel['name_panel'] . ' response=' . json_encode($dataoutput, JSON_UNESCAPED_UNICODE));
+            $pdo->prepare("DELETE FROM invoice WHERE id_invoice = ? AND Status = 'creating'")->execute([$invoiceId]);
+            return ['status' => 'create_failed', 'panel_response' => $dataoutput];
+        }
+
+        $pdo->beginTransaction();
+        $stmt = $pdo->prepare("UPDATE user SET Balance = Balance - ? WHERE id = ? AND Balance >= ?");
+        $stmt->execute([$price, $userId, $price]);
+        if ($stmt->rowCount() !== 1) {
+            $pdo->rollBack();
+            error_log('reseller_purchase balance deduction failed after create user=' . $userId . ' product=' . $productId . ' username=' . $username_ac);
+            update("invoice", "Status", "active", "id_invoice", $invoiceId);
+            return ['status' => 'insufficient_balance'];
+        }
+        update("invoice", "Status", "active", "id_invoice", $invoiceId);
+        $orderId = bin2hex(random_bytes(5));
+        $paymentTime = date('Y/m/d H:i:s');
+        $stmt = $pdo->prepare("INSERT INTO Payment_report (id_user, id_order, time, price, payment_Status, Payment_Method, invoice) VALUES (?, ?, ?, ?, ?, ?, ?)");
+        $invoiceRef = 'reseller_direct|' . $username_ac;
+        $paymentStatus = 'paid';
+        $paymentMethod = 'wallet';
+        $stmt->execute([$userId, $orderId, $paymentTime, $price, $paymentStatus, $paymentMethod, $invoiceRef]);
+        $pdo->commit();
+
+        $invoice = [
+            'id_invoice' => $invoiceId,
+            'id_user' => $userId,
+            'username' => $username_ac,
+            'Service_location' => $panel['name_panel'],
+            'name_product' => $product['name_product'],
+            'price_product' => $product['price_product'],
+            'Volume' => $product['Volume_constraint'],
+            'Service_time' => $product['Service_time'],
+            'Status' => 'active',
+        ];
+
         return [
-            'status' => 'need_payment',
-            'amount' => $price - $balance,
+            'status' => 'created',
             'invoice_id' => $invoiceId,
             'username' => $username_ac,
+            'invoice' => $invoice,
+            'panel' => $panel,
+            'dataoutput' => $dataoutput,
         ];
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log('reseller_purchase exception user=' . $userId . ' product=' . $productId . ' error=' . $e->getMessage());
+        return ['status' => 'exception', 'message' => $e->getMessage()];
     }
-
-    $orderId = bin2hex(random_bytes(5));
-    $paymentStatus = 'paid';
-    $paymentMethod = 'wallet';
-    $invoiceRef = "getconfigafterpay|{$username_ac}";
-    $paymentTime = date('Y/m/d H:i:s');
-    $stmt = $pdo->prepare("INSERT INTO Payment_report (id_user, id_order, time, price, payment_Status, Payment_Method, invoice) VALUES (?, ?, ?, ?, ?, ?, ?)");
-    $stmt->execute([
-        $userId,
-        $orderId,
-        $paymentTime,
-        $price,
-        $paymentStatus,
-        $paymentMethod,
-        $invoiceRef,
-    ]);
-    DirectPayment($orderId);
-    return [
-        'status' => 'created',
-        'invoice_id' => $invoiceId,
-        'username' => $username_ac,
-    ];
 }
 
 function buildResellerProductsKeyboard($resellerUserId, $page = 1)
