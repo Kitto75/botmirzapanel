@@ -71,12 +71,23 @@ $keyboardPanel = json_encode([
 $keyboardadmin = json_encode([
     'keyboard' => [
         [['text' => $textbotlang['Admin']['keyboardadmin']['bot_statistics']]],
+        [['text' => $textbotlang['Admin']['keyboardadmin']['toggle_bot_status']], ['text' => $textbotlang['Admin']['keyboardadmin']['backup_manage']]],
         [['text' => $textbotlang['Admin']['keyboardadmin']['manage_panel']], ['text' => $textbotlang['Admin']['keyboardadmin']['add_panel']]],
         [['text' => $textbotlang['Admin']['keyboardadmin']['shop_section']], ['text' => $textbotlang['Admin']['keyboardadmin']['finance']]],
         [['text' => $textbotlang['Admin']['keyboardadmin']['admin_section']], ['text' => $textbotlang['Admin']['keyboardadmin']['bot_text_settings']]],
         [['text' => $textbotlang['Admin']['keyboardadmin']['user_services']], ['text' => $textbotlang['Admin']['keyboardadmin']['user_search']], ['text' => $textbotlang['Admin']['keyboardadmin']['send_message']]],
         [['text' => $textbotlang['Admin']['keyboardadmin']['tutorial_section']], ['text' => $textbotlang['Admin']['keyboardadmin']['settings']]],
         [['text' => $textbotlang['users']['backhome']]]
+    ],
+    'resize_keyboard' => true
+]);
+
+$backupkeyboard = json_encode([
+    'keyboard' => [
+        [['text' => $textbotlang['Admin']['backup']['status_toggle']]],
+        [['text' => $textbotlang['Admin']['backup']['set_interval']]],
+        [['text' => $textbotlang['Admin']['backup']['manual_now']]],
+        [['text' => $textbotlang['Admin']['backup']['back']]],
     ],
     'resize_keyboard' => true
 ]);
@@ -663,7 +674,7 @@ function KeyboardProduct($location, $backdata, $MethodUsername, $categoryid = nu
 $resellerkeyboard = json_encode([
     'keyboard' => [
         [['text' => $textbotlang['Admin']['reseller']['add']], ['text' => $textbotlang['Admin']['reseller']['remove']]],
-        [['text' => $textbotlang['Admin']['reseller']['list']]],
+        [['text' => $textbotlang['Admin']['reseller']['list']], ['text' => $textbotlang['Admin']['reseller']['edit_display_name']]],
         [['text' => $textbotlang['Admin']['reseller']['addproduct'],], ['text' => $textbotlang['Admin']['reseller']['products']]],
         [['text' => $textbotlang['Admin']['reseller']['setextra']], ['text' => $textbotlang['Admin']['reseller']['extra_list']]],
         [['text' => $textbotlang['Admin']['Back-Adminment']]],

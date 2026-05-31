@@ -111,6 +111,13 @@ function isReseller($userId)
 }
 
 
+function isMainAdmin($userId)
+{
+    global $adminnumber;
+    $userId = trim((string)$userId);
+    return $userId !== '' && trim((string)$adminnumber) !== '' && $userId === trim((string)$adminnumber);
+}
+
 function isAdminUser($userId)
 {
     global $pdo, $adminnumber;
@@ -222,6 +229,16 @@ function formatResellerTariffList($resellerUserId)
     }
     return implode("\n", $lines);
 }
+
+function getResellerDisplayName($reseller)
+{
+    $displayName = trim((string)($reseller['display_name'] ?? ''));
+    return $displayName === '' ? 'بدون نام' : $displayName;
+}
+function formatResellerSelectionLabel($reseller)
+{
+    return getResellerDisplayName($reseller) . " ({$reseller['user_id']})";
+}
 function getResellerByUserId($userId)
 {
     global $pdo;
@@ -272,7 +289,7 @@ function buildResellerExtraPricesKeyboard($page = 1)
     $page = max(1, intval($page));
     $limit = 10;
     $offset = ($page - 1) * $limit;
-    $stmt = $pdo->prepare("SELECT r.user_id, COALESCE(rs.extra_volume_price,0) AS extra_volume_price FROM resellers r LEFT JOIN reseller_settings rs ON rs.reseller_user_id=r.user_id WHERE r.status='active' ORDER BY r.user_id ASC LIMIT :lim OFFSET :off");
+    $stmt = $pdo->prepare("SELECT r.user_id, r.display_name, COALESCE(rs.extra_volume_price,0) AS extra_volume_price FROM resellers r LEFT JOIN reseller_settings rs ON rs.reseller_user_id=r.user_id WHERE r.status='active' ORDER BY r.user_id ASC LIMIT :lim OFFSET :off");
     $stmt->bindValue(':lim', $limit, PDO::PARAM_INT);
     $stmt->bindValue(':off', $offset, PDO::PARAM_INT);
     $stmt->execute();
@@ -280,7 +297,7 @@ function buildResellerExtraPricesKeyboard($page = 1)
     $keyboard = ['inline_keyboard' => []];
     foreach ($rows as $row) {
         $keyboard['inline_keyboard'][] = [[
-            'text' => "{$row['user_id']} | {$row['extra_volume_price']}",
+            'text' => formatResellerSelectionLabel($row),
             'callback_data' => "reseller_extra_view_{$row['user_id']}"
         ]];
     }
@@ -297,6 +314,160 @@ function formatResellerProductDetails($product)
     global $textbotlang;
     return sprintf($textbotlang['Admin']['reseller']['product_details'], $product['reseller_user_id'], $product['id'], $product['code_product'], $product['name_product'], $product['price_product'], $product['Volume_constraint'], $product['Location'], $product['Service_time'], $product['Category'], $product['status']);
 }
+
+function generateBotBackup()
+{
+    global $dbname, $usernamedb, $passworddb;
+
+    if (!(function_exists('shell_exec') && is_callable('shell_exec'))) {
+        return ['success' => false, 'error' => 'تابع shell_exec برای ساخت بکاپ فعال نیست.'];
+    }
+
+    $mysqldumpPath = trim((string)shell_exec('command -v mysqldump 2>/dev/null'));
+    if ($mysqldumpPath === '') {
+        return ['success' => false, 'error' => 'ابزار mysqldump روی سرور پیدا نشد.'];
+    }
+
+    $tarPath = trim((string)shell_exec('command -v tar 2>/dev/null'));
+    if ($tarPath === '') {
+        return ['success' => false, 'error' => 'ابزار tar روی سرور پیدا نشد.'];
+    }
+
+    $baseDir = realpath(__DIR__);
+    if ($baseDir === false) {
+        return ['success' => false, 'error' => 'مسیر پروژه برای ساخت بکاپ پیدا نشد.'];
+    }
+
+    $tempBase = is_dir('/root') && is_writable('/root') ? '/root' : sys_get_temp_dir();
+    $backupId = 'bot_backup_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4));
+    $workDir = rtrim($tempBase, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $backupId;
+    if (!mkdir($workDir, 0700, true) && !is_dir($workDir)) {
+        return ['success' => false, 'error' => 'امکان ساخت پوشه موقت بکاپ وجود ندارد.'];
+    }
+
+    $cleanupDir = function ($dir) use (&$cleanupDir) {
+        if (!is_dir($dir)) return;
+        $items = array_diff(scandir($dir), ['.', '..']);
+        foreach ($items as $item) {
+            $path = $dir . DIRECTORY_SEPARATOR . $item;
+            if (is_dir($path)) {
+                $cleanupDir($path);
+            } else {
+                @unlink($path);
+            }
+        }
+        @rmdir($dir);
+    };
+
+    $dumpPath = $workDir . DIRECTORY_SEPARATOR . 'database.sql';
+    $defaultsPath = $workDir . DIRECTORY_SEPARATOR . 'mysql.cnf';
+    $defaults = "[client]\nuser=" . (string)$usernamedb . "\npassword=" . (string)$passworddb . "\nhost=localhost\ndefault-character-set=utf8mb4\n";
+    file_put_contents($defaultsPath, $defaults);
+    @chmod($defaultsPath, 0600);
+
+    $dumpCommand = escapeshellcmd($mysqldumpPath)
+        . ' --defaults-extra-file=' . escapeshellarg($defaultsPath)
+        . ' --single-transaction --quick --routines --triggers --events '
+        . escapeshellarg($dbname)
+        . ' > ' . escapeshellarg($dumpPath)
+        . ' 2> ' . escapeshellarg($workDir . DIRECTORY_SEPARATOR . 'mysqldump_error.log');
+    shell_exec($dumpCommand);
+    @unlink($defaultsPath);
+
+    if (!is_file($dumpPath) || filesize($dumpPath) === 0) {
+        $errorLog = $workDir . DIRECTORY_SEPARATOR . 'mysqldump_error.log';
+        $errorText = is_file($errorLog) ? trim((string)file_get_contents($errorLog)) : '';
+        $cleanupDir($workDir);
+        return ['success' => false, 'error' => 'خطا در ساخت خروجی دیتابیس.' . ($errorText !== '' ? "\n" . $errorText : '')];
+    }
+
+    $filesDir = $workDir . DIRECTORY_SEPARATOR . 'files';
+    mkdir($filesDir, 0700, true);
+    $importantFiles = [
+        'config.php',
+        'README.md',
+        'install.sh',
+        'text.php',
+        'keyboard.php',
+        'table.php',
+    ];
+    foreach ($importantFiles as $relativePath) {
+        $source = $baseDir . DIRECTORY_SEPARATOR . $relativePath;
+        if (!is_file($source)) continue;
+        $destination = $filesDir . DIRECTORY_SEPARATOR . $relativePath;
+        $destinationDir = dirname($destination);
+        if (!is_dir($destinationDir)) mkdir($destinationDir, 0700, true);
+        copy($source, $destination);
+    }
+
+    $restoreNote = "Bot backup restore note\n"
+        . "Created at: " . date('Y-m-d H:i:s') . "\n\n"
+        . "Contents:\n"
+        . "- database.sql: MySQL dump created by mysqldump.\n"
+        . "- files/: important local config/data files, including config.php when available.\n\n"
+        . "Restore outline:\n"
+        . "1. Upload the bot source code to the server.\n"
+        . "2. Restore files/config.php into the bot root and review database/token/domain values.\n"
+        . "3. Import database.sql into the configured MySQL database.\n"
+        . "4. Re-run required cron setup from the admin panel if needed.\n";
+    file_put_contents($workDir . DIRECTORY_SEPARATOR . 'README_RESTORE.txt', $restoreNote);
+
+    $archivePath = rtrim($tempBase, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $backupId . '.tar.gz';
+    $tarCommand = 'cd ' . escapeshellarg($workDir) . ' && ' . escapeshellcmd($tarPath) . ' -czf ' . escapeshellarg($archivePath) . ' database.sql files README_RESTORE.txt 2> ' . escapeshellarg($workDir . DIRECTORY_SEPARATOR . 'tar_error.log');
+    shell_exec($tarCommand);
+
+    if (!is_file($archivePath) || filesize($archivePath) === 0) {
+        $errorLog = $workDir . DIRECTORY_SEPARATOR . 'tar_error.log';
+        $errorText = is_file($errorLog) ? trim((string)file_get_contents($errorLog)) : '';
+        $cleanupDir($workDir);
+        return ['success' => false, 'error' => 'خطا در ساخت فایل فشرده بکاپ.' . ($errorText !== '' ? "\n" . $errorText : '')];
+    }
+
+    $cleanupDir($workDir);
+    return ['success' => true, 'path' => $archivePath, 'filename' => basename($archivePath)];
+}
+
+function getBackupCronCommand()
+{
+    global $domainhosts;
+    return "* * * * * curl https://{$domainhosts}/cron/backup.php";
+}
+
+function installBackupCron()
+{
+    if (!(function_exists('shell_exec') && is_callable('shell_exec'))) {
+        return ['success' => false, 'error' => 'shell_exec_unavailable', 'command' => getBackupCronCommand()];
+    }
+    $cronCommand = getBackupCronCommand();
+    $currentCronJobs = (string)shell_exec('crontab -l 2>/dev/null');
+    $lines = array_filter(array_map('rtrim', explode("\n", $currentCronJobs)), fn($line) => trim($line) !== '');
+    if (!in_array($cronCommand, $lines, true)) {
+        $lines[] = $cronCommand;
+        $tempFile = tempnam(sys_get_temp_dir(), 'backup_cron_');
+        file_put_contents($tempFile, implode("\n", $lines) . "\n");
+        shell_exec('crontab ' . escapeshellarg($tempFile));
+        @unlink($tempFile);
+    }
+    return ['success' => true, 'command' => $cronCommand];
+}
+
+function removeBackupCron()
+{
+    if (!(function_exists('shell_exec') && is_callable('shell_exec'))) {
+        return ['success' => false, 'error' => 'shell_exec_unavailable', 'command' => getBackupCronCommand()];
+    }
+    $cronCommand = getBackupCronCommand();
+    $currentCronJobs = (string)shell_exec('crontab -l 2>/dev/null');
+    $lines = array_filter(array_map('rtrim', explode("\n", $currentCronJobs)), function ($line) use ($cronCommand) {
+        return trim($line) !== '' && trim($line) !== $cronCommand;
+    });
+    $tempFile = tempnam(sys_get_temp_dir(), 'backup_cron_');
+    file_put_contents($tempFile, empty($lines) ? '' : implode("\n", $lines) . "\n");
+    shell_exec('crontab ' . escapeshellarg($tempFile));
+    @unlink($tempFile);
+    return ['success' => true, 'command' => $cronCommand];
+}
+
 function generateUUID()
 {
     $data = openssl_random_pseudo_bytes(16);

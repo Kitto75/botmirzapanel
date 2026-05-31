@@ -83,6 +83,25 @@ try {
 }
 //-----------------------------------------------------------------
 try {
+    $result = $connect->query("SHOW TABLES LIKE 'backup_settings'");
+    if ($result->num_rows == 0) {
+        $connect->query("CREATE TABLE backup_settings (
+            id INT NOT NULL DEFAULT 1 PRIMARY KEY,
+            status VARCHAR(20) NOT NULL DEFAULT 'off',
+            interval_minutes INT NOT NULL DEFAULT 60,
+            last_backup_at INT NOT NULL DEFAULT 0,
+            target_chat_id VARCHAR(100) NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin");
+    } else {
+        addFieldToTable('backup_settings', 'status', 'off', "VARCHAR(20) NOT NULL DEFAULT 'off'");
+        addFieldToTable('backup_settings', 'interval_minutes', '60', "INT NOT NULL DEFAULT 60");
+        addFieldToTable('backup_settings', 'last_backup_at', '0', "INT NOT NULL DEFAULT 0");
+        addFieldToTable('backup_settings', 'target_chat_id', null, 'VARCHAR(100) NULL');
+    }
+    $connect->query("INSERT IGNORE INTO backup_settings (id,status,interval_minutes,last_backup_at,target_chat_id) VALUES (1,'off',60,0,NULL)");
+} catch (Exception $e) { file_put_contents("$randomString.txt",$e->getMessage()); }
+//-----------------------------------------------------------------
+try {
     $result = $connect->query("SHOW TABLES LIKE 'help'");
     $table_exists = ($result->num_rows > 0);
 
@@ -635,10 +654,12 @@ try {
         $connect->query("CREATE TABLE resellers (
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             user_id VARCHAR(100) NOT NULL UNIQUE,
+            display_name VARCHAR(255) NULL,
             status VARCHAR(20) NOT NULL DEFAULT 'active',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin");
     }
+    addFieldToTable('resellers', 'display_name', null, 'VARCHAR(255) NULL');
 } catch (Exception $e) { file_put_contents("$randomString.txt",$e->getMessage()); }
 
 try {

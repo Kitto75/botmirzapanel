@@ -39,6 +39,10 @@ $users_ids = select("user", "id", null, null, "FETCH_COLUMN");
 $setting = select("setting", "*");
 $extraVolumePrice = getResellerExtraVolumePrice($from_id);
 $admin_ids = array_map("strval", select("admin", "id_admin", null, null, "FETCH_COLUMN"));
+if (($setting['Bot_Status'] ?? '1') === '0' && !isAdminUser($from_id)) {
+    sendmessage($from_id, 'ربات موقتاً توسط مدیریت غیرفعال شده است.', null, 'html');
+    exit;
+}
 if (!in_array($from_id, $users_ids) && intval($from_id) != 0) {
     $Response = json_encode([
         'inline_keyboard' => [
