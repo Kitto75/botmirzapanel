@@ -1643,31 +1643,91 @@ if ($text == $textbotlang['users']['reseller_buybtn'] || $datain == 'reseller_bu
     }
     $product = getActiveResellerProductForUser($from_id, $dataget[1]);
     if (!$product) {
-        sendmessage($from_id, $textbotlang['users']['buy']['reseller_no_products'], $keyboard, 'HTML');
+        sendmessage($from_id, resellerPurchaseErrorMessage('not_found'), $keyboard, 'HTML');
         return;
     }
-    $panel = select("marzban_panel", "*", "name_panel", $product['Location'], "select");
-    if (!$panel && $product['Location'] === '/all') {
-        $panel = select("marzban_panel", "*", "status", "activepanel", "select");
+    $resolvedPanel = resolveResellerProductPanel($product);
+    if (($resolvedPanel['status'] ?? '') === 'need_panel') {
+        Editmessagetext($from_id, $message_id, "📍 لطفاً پنل موردنظر برای ساخت سرویس را انتخاب کنید:", buildResellerPanelSelectionKeyboard($product['id'], $resolvedPanel['panels']));
+        return;
     }
-    if ($panel && $panel['MethodUsername'] == $textbotlang['users']['customusername']) {
-        update("user", "Processing_value_four", (string)$product['id'], "id", $from_id);
+    if (($resolvedPanel['status'] ?? '') !== 'ok') {
+        sendmessage($from_id, resellerPurchaseErrorMessage($resolvedPanel['status'] ?? 'panel_not_found'), $keyboard, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    $panelValidation = validateResellerPurchasePanel($resolvedPanel['panel']);
+    if (($panelValidation['status'] ?? '') !== 'ok') {
+        sendmessage($from_id, resellerPurchaseErrorMessage($panelValidation['status'], $panelValidation['reason'] ?? ''), $keyboard, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    if ($resolvedPanel['panel']['MethodUsername'] == $textbotlang['users']['customusername']) {
+        update("user", "Processing_value_four", json_encode(['product_id' => (string)$product['id'], 'panel' => $resolvedPanel['panel']['name_panel']]), "id", $from_id);
         sendmessage($from_id, $textbotlang['users']['selectusername'], $backuser, 'HTML');
         step('reseller_buy_custom_username', $from_id);
         return;
     }
-    $result = startResellerProductPurchase($from_id, $product['id']);
-    if (($result['status'] ?? '') === 'need_payment') {
-        sendmessage($from_id, $textbotlang['users']['sell']['None-credit'], $step_payment, 'HTML');
+    $result = startResellerProductPurchase($from_id, $product['id'], null, $resolvedPanel['panel']['name_panel']);
+    if (($result['status'] ?? '') === 'insufficient_balance') {
+        sendmessage($from_id, resellerPurchaseErrorMessage('insufficient_balance') . "\n" . $textbotlang['users']['sell']['None-credit'], $step_payment, 'HTML');
         step('get_step_payment', $from_id);
         return;
     }
     if (($result['status'] ?? '') === 'created') {
-        sendmessage($from_id, $textbotlang['users']['buy']['reseller_purchase_started'], $keyboard, 'HTML');
+        sendPurchasedServiceMessage($from_id, $result['invoice'], $result['panel'], $result['dataoutput']);
         step('home', $from_id);
         return;
     }
-    sendmessage($from_id, $textbotlang['users']['status']['error2'], $keyboard, 'HTML');
+    sendmessage($from_id, resellerPurchaseErrorMessage($result['status'] ?? 'exception', $result['reason'] ?? ''), $keyboard, 'HTML');
+    step('home', $from_id);
+    return;
+} elseif (preg_match('/^reseller_select_panel_(\d+)_(\d+)$/', $datain, $dataget)) {
+    if (!isReseller($from_id)) {
+        sendmessage($from_id, $textbotlang['users']['buy']['reseller_only'], $keyboard, 'HTML');
+        return;
+    }
+    $product = getActiveResellerProductForUser($from_id, $dataget[1]);
+    if (!$product) {
+        sendmessage($from_id, resellerPurchaseErrorMessage('not_found'), $keyboard, 'HTML');
+        return;
+    }
+    $panel = select("marzban_panel", "*", "id", $dataget[2], "select");
+    if (!$panel) {
+        sendmessage($from_id, resellerPurchaseErrorMessage('panel_not_found'), $keyboard, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    $resolvedPanel = resolveResellerProductPanel($product, $panel['name_panel']);
+    if (($resolvedPanel['status'] ?? '') !== 'ok') {
+        sendmessage($from_id, resellerPurchaseErrorMessage($resolvedPanel['status'] ?? 'panel_not_found'), $keyboard, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    $panelValidation = validateResellerPurchasePanel($resolvedPanel['panel']);
+    if (($panelValidation['status'] ?? '') !== 'ok') {
+        sendmessage($from_id, resellerPurchaseErrorMessage($panelValidation['status'], $panelValidation['reason'] ?? ''), $keyboard, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    if ($resolvedPanel['panel']['MethodUsername'] == $textbotlang['users']['customusername']) {
+        update("user", "Processing_value_four", json_encode(['product_id' => (string)$product['id'], 'panel' => $resolvedPanel['panel']['name_panel']]), "id", $from_id);
+        sendmessage($from_id, $textbotlang['users']['selectusername'], $backuser, 'HTML');
+        step('reseller_buy_custom_username', $from_id);
+        return;
+    }
+    $result = startResellerProductPurchase($from_id, $product['id'], null, $resolvedPanel['panel']['name_panel']);
+    if (($result['status'] ?? '') === 'insufficient_balance') {
+        sendmessage($from_id, resellerPurchaseErrorMessage('insufficient_balance') . "\n" . $textbotlang['users']['sell']['None-credit'], $step_payment, 'HTML');
+        step('get_step_payment', $from_id);
+        return;
+    }
+    if (($result['status'] ?? '') === 'created') {
+        sendPurchasedServiceMessage($from_id, $result['invoice'], $result['panel'], $result['dataoutput']);
+        step('home', $from_id);
+        return;
+    }
+    sendmessage($from_id, resellerPurchaseErrorMessage($result['status'] ?? 'exception', $result['reason'] ?? ''), $keyboard, 'HTML');
     step('home', $from_id);
     return;
 } elseif ($user['step'] == 'reseller_buy_custom_username') {
@@ -1675,23 +1735,30 @@ if ($text == $textbotlang['users']['reseller_buybtn'] || $datain == 'reseller_bu
         step('home', $from_id);
         return;
     }
-    $productId = $user['Processing_value_four'];
-    $result = startResellerProductPurchase($from_id, $productId, $text);
+    $pending = json_decode((string)$user['Processing_value_four'], true);
+    if (is_array($pending)) {
+        $productId = $pending['product_id'] ?? null;
+        $selectedPanelName = $pending['panel'] ?? null;
+    } else {
+        $productId = $user['Processing_value_four'];
+        $selectedPanelName = null;
+    }
+    $result = startResellerProductPurchase($from_id, $productId, $text, $selectedPanelName);
     if (($result['status'] ?? '') === 'invalid_username') {
-        sendmessage($from_id, $textbotlang['users']['invalidusername'], $backuser, 'HTML');
+        sendmessage($from_id, resellerPurchaseErrorMessage('invalid_username'), $backuser, 'HTML');
         return;
     }
-    if (($result['status'] ?? '') === 'need_payment') {
-        sendmessage($from_id, $textbotlang['users']['sell']['None-credit'], $step_payment, 'HTML');
+    if (($result['status'] ?? '') === 'insufficient_balance') {
+        sendmessage($from_id, resellerPurchaseErrorMessage('insufficient_balance') . "\n" . $textbotlang['users']['sell']['None-credit'], $step_payment, 'HTML');
         step('get_step_payment', $from_id);
         return;
     }
     if (($result['status'] ?? '') === 'created') {
-        sendmessage($from_id, $textbotlang['users']['buy']['reseller_purchase_started'], $keyboard, 'HTML');
+        sendPurchasedServiceMessage($from_id, $result['invoice'], $result['panel'], $result['dataoutput']);
         step('home', $from_id);
         return;
     }
-    sendmessage($from_id, $textbotlang['users']['status']['error2'], $keyboard, 'HTML');
+    sendmessage($from_id, resellerPurchaseErrorMessage($result['status'] ?? 'exception', $result['reason'] ?? ''), $keyboard, 'HTML');
     step('home', $from_id);
     return;
 }
@@ -2596,6 +2663,65 @@ if ($text == $textbotlang['users']['affiliates']['btn']) {
     }
     $textaffiliates = sprintf($textbotlang['users']['affiliates']['infotext'], $price_Discount, $affiliatespercentage);
     sendmessage($from_id, $textaffiliates, $keyboard, 'HTML');
+}
+if (preg_match('/^\/debug_reseller_buy\s+(\d+)\s+(\d+)$/', trim((string)$text), $debugMatch) && isAdminUser($from_id)) {
+    $debugUserId = $debugMatch[1];
+    $debugProductId = $debugMatch[2];
+    $isRes = isReseller($debugUserId) ? 'true' : 'false';
+    $resellerRow = getResellerByUserId($debugUserId);
+    $stmt = $pdo->prepare("SELECT * FROM reseller_products WHERE id = :id LIMIT 1");
+    $stmt->execute([':id' => $debugProductId]);
+    $debugProduct = $stmt->fetch(PDO::FETCH_ASSOC);
+    $debugUser = select("user", "*", "id", $debugUserId, "select");
+    $resolvedText = 'not-resolved';
+    $panelText = 'not-found';
+    $balance = (int)($debugUser['Balance'] ?? 0);
+    $price = (int)($debugProduct['price_product'] ?? 0);
+    $inboundsPresence = 'missing';
+    $proxiesPresence = 'missing';
+    if ($debugProduct) {
+        $resolved = resolveResellerProductPanel($debugProduct);
+        $resolvedText = $resolved['status'] ?? 'unknown';
+        if (($resolved['status'] ?? '') === 'need_panel') {
+            $panelNames = array_map(function ($panel) { return $panel['name_panel']; }, $resolved['panels']);
+            $resolvedText .= ' (' . implode(', ', $panelNames) . ')';
+        } elseif (($resolved['status'] ?? '') === 'ok') {
+            $debugPanel = $resolved['panel'];
+            $validation = validateResellerPurchasePanel($debugPanel);
+            $panelText = sprintf(
+                'type=%s | status=%s | MethodUsername=%s | validation=%s%s',
+                $debugPanel['type'] ?? 'null',
+                $debugPanel['status'] ?? 'null',
+                $debugPanel['MethodUsername'] ?? 'null',
+                $validation['status'] ?? 'unknown',
+                isset($validation['reason']) ? ' | reason=' . $validation['reason'] : ''
+            );
+            $inboundsPresence = !empty($debugPanel['inbounds']) || !empty($debugPanel['inboundid']) ? 'present' : 'missing';
+            $decodedProxies = json_decode((string)($debugPanel['proxies'] ?? ''), true);
+            $proxiesPresence = !empty($debugPanel['proxies']) && json_last_error() === JSON_ERROR_NONE && !empty($decodedProxies) ? 'present' : 'missing';
+        }
+    }
+    $resellerInfo = $resellerRow
+        ? sprintf('status=%s | display_name=%s', $resellerRow['status'] ?? 'null', $resellerRow['display_name'] ?? 'null')
+        : 'not-found';
+    $productInfo = $debugProduct
+        ? sprintf('status=%s | reseller_user_id=%s | location=%s', $debugProduct['status'] ?? 'null', $debugProduct['reseller_user_id'] ?? 'null', $debugProduct['Location'] ?? 'null')
+        : 'not-found';
+    $msg = "🔎 debug_reseller_buy"
+        . "\nreseller_user_id: <code>{$debugUserId}</code>"
+        . "\nproduct_id: <code>{$debugProductId}</code>"
+        . "\nisReseller: <code>{$isRes}</code>"
+        . "\nreseller: <code>{$resellerInfo}</code>"
+        . "\nproduct: <code>{$productInfo}</code>"
+        . "\nresolved_panel: <code>{$resolvedText}</code>"
+        . "\npanel: <code>{$panelText}</code>"
+        . "\nbalance: <code>{$balance}</code>"
+        . "\nprice: <code>{$price}</code>"
+        . "\nbalance_enough: <code>" . ($balance >= $price ? 'true' : 'false') . "</code>"
+        . "\ninbounds: <code>{$inboundsPresence}</code>"
+        . "\nproxies: <code>{$proxiesPresence}</code>";
+    sendmessage($from_id, $msg, null, 'HTML');
+    return;
 }
 if (preg_match('/^\/debug_reseller_products\s+(\d+)$/', trim((string)$text), $debugMatch) && isAdminUser($from_id)) {
     $uid = $debugMatch[1];
