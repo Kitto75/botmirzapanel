@@ -42,17 +42,27 @@ if ($table_exists) {
         }
     }
 }
-$keyboard = [
-    'keyboard' => [
-        [['text' => $datatextbot['text_sell']], ['text' => $datatextbot['text_usertest']]],
-        [['text' => $datatextbot['text_Purchased_services']], ['text' => $datatextbot['text_Tariff_list']]],
-        [['text' => $datatextbot['text_account']], ['text' => $datatextbot['text_Add_Balance']]],
-        [['text' => $datatextbot['text_support']], ['text' => $datatextbot['text_help']]],
-    ],
-    'resize_keyboard' => true
-];
-if (!isReseller($from_id)) {
-    $keyboard['keyboard'][] = [['text' => $textbotlang['users']['affiliates']['btn']]];
+if (isReseller($from_id)) {
+    $keyboard = [
+        'keyboard' => [
+            [['text' => $textbotlang['users']['reseller_buybtn']]],
+            [['text' => $datatextbot['text_Purchased_services']], ['text' => $datatextbot['text_Tariff_list']]],
+            [['text' => $datatextbot['text_account']], ['text' => $datatextbot['text_Add_Balance']]],
+            [['text' => $datatextbot['text_support']], ['text' => $datatextbot['text_help']]],
+        ],
+        'resize_keyboard' => true
+    ];
+} else {
+    $keyboard = [
+        'keyboard' => [
+            [['text' => $datatextbot['text_sell']], ['text' => $datatextbot['text_usertest']]],
+            [['text' => $datatextbot['text_Purchased_services']], ['text' => $datatextbot['text_Tariff_list']]],
+            [['text' => $datatextbot['text_account']], ['text' => $datatextbot['text_Add_Balance']]],
+            [['text' => $datatextbot['text_support']], ['text' => $datatextbot['text_help']]],
+            [['text' => $textbotlang['users']['affiliates']['btn']]],
+        ],
+        'resize_keyboard' => true
+    ];
 }
 if (isAdminUser($from_id)) {
     $keyboard['keyboard'][] = [
@@ -72,6 +82,7 @@ $keyboardadmin = json_encode([
     'keyboard' => [
         [['text' => $textbotlang['Admin']['keyboardadmin']['bot_statistics']]],
         [['text' => $textbotlang['Admin']['keyboardadmin']['toggle_bot_status']], ['text' => $textbotlang['Admin']['keyboardadmin']['backup_manage']]],
+        [['text' => $textbotlang['Admin']['keyboardadmin']['set_maintenance_message']], ['text' => $textbotlang['Admin']['keyboardadmin']['delete_maintenance_message']]],
         [['text' => $textbotlang['Admin']['keyboardadmin']['manage_panel']], ['text' => $textbotlang['Admin']['keyboardadmin']['add_panel']]],
         [['text' => $textbotlang['Admin']['keyboardadmin']['shop_section']], ['text' => $textbotlang['Admin']['keyboardadmin']['finance']]],
         [['text' => $textbotlang['Admin']['keyboardadmin']['admin_section']], ['text' => $textbotlang['Admin']['keyboardadmin']['bot_text_settings']]],

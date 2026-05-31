@@ -39,10 +39,15 @@ $users_ids = select("user", "id", null, null, "FETCH_COLUMN");
 $setting = select("setting", "*");
 $extraVolumePrice = getResellerExtraVolumePrice($from_id);
 $admin_ids = array_map("strval", select("admin", "id_admin", null, null, "FETCH_COLUMN"));
-if (($setting['Bot_Status'] ?? '1') === '0' && !isAdminUser($from_id)) {
-    sendmessage($from_id, 'ربات موقتاً توسط مدیریت غیرفعال شده است.', null, 'html');
+$maintenanceSettings = getMaintenanceSettings();
+if (($maintenanceSettings['maintenance_mode'] ?? 'off') === 'on' && !isAdminUser($from_id)) {
+    $maintenanceMessage = trim((string)($maintenanceSettings['maintenance_message'] ?? ''));
+    if ($maintenanceMessage !== '') {
+        sendmessage($from_id, $maintenanceMessage, null, 'html');
+    }
     exit;
 }
+$setting = select("setting", "*");
 if (!in_array($from_id, $users_ids) && intval($from_id) != 0) {
     $Response = json_encode([
         'inline_keyboard' => [
@@ -292,9 +297,8 @@ if ($text == $textbotlang['users']['rulesaccept']) {
 }
 
 #-----------Bot_Status------------#
-if ($setting['Bot_Status'] == "0" && !isAdminUser($from_id)) {
-    sendmessage($from_id, $datatextbot['text_bot_off'], null, 'html');
-    return;
+if (($setting['Bot_Status'] ?? '1') == "0" && !isAdminUser($from_id)) {
+    exit;
 }
 #-----------clear_data------------#
 $stmt = $pdo->prepare("SELECT * FROM invoice WHERE id_user = :id_user AND status = 'unpaid'");
@@ -1594,7 +1598,113 @@ if ($text == $datatextbot['text_account']) {
     $text_account .= "\n\n" . (isReseller($from_id) ? $textbotlang['users']['account_type_reseller'] : $textbotlang['users']['account_type_normal']);
     sendmessage($from_id, $text_account, $keyboardPanel, 'HTML');
 }
+if ($text == $textbotlang['users']['reseller_buybtn'] || $datain == 'reseller_buy_back') {
+    if (!isReseller($from_id)) {
+        sendmessage($from_id, $textbotlang['users']['buy']['reseller_only'], $keyboard, 'HTML');
+        return;
+    }
+    $products = getActiveResellerProductsForUser($from_id);
+    if (count($products) == 0) {
+        sendmessage($from_id, $textbotlang['users']['buy']['reseller_no_products'], $keyboard, 'HTML');
+        return;
+    }
+    if ($datain == 'reseller_buy_back') {
+        Editmessagetext($from_id, $message_id, $textbotlang['users']['buy']['reseller_products_title'], buildResellerBuyKeyboard($from_id));
+    } else {
+        sendmessage($from_id, $textbotlang['users']['buy']['reseller_products_title'], buildResellerBuyKeyboard($from_id), 'HTML');
+    }
+    step('home', $from_id);
+    return;
+} elseif (preg_match('/^reseller_buy_product_(\d+)$/', $datain, $dataget)) {
+    if (!isReseller($from_id)) {
+        sendmessage($from_id, $textbotlang['users']['buy']['reseller_only'], $keyboard, 'HTML');
+        return;
+    }
+    $product = getActiveResellerProductForUser($from_id, $dataget[1]);
+    if (!$product) {
+        Editmessagetext($from_id, $message_id, $textbotlang['users']['buy']['reseller_no_products'], json_encode(['inline_keyboard' => []]));
+        return;
+    }
+    $details = sprintf(
+        $textbotlang['users']['buy']['reseller_product_details'],
+        $product['name_product'],
+        number_format((float)$product['price_product'], 0),
+        $product['Volume_constraint'],
+        $product['Service_time'],
+        $product['Location'],
+        $product['Category']
+    );
+    Editmessagetext($from_id, $message_id, $details, buildResellerBuyDetailsKeyboard($product['id']));
+    return;
+} elseif (preg_match('/^confirm_reseller_buy_(\d+)$/', $datain, $dataget)) {
+    if (!isReseller($from_id)) {
+        sendmessage($from_id, $textbotlang['users']['buy']['reseller_only'], $keyboard, 'HTML');
+        return;
+    }
+    $product = getActiveResellerProductForUser($from_id, $dataget[1]);
+    if (!$product) {
+        sendmessage($from_id, $textbotlang['users']['buy']['reseller_no_products'], $keyboard, 'HTML');
+        return;
+    }
+    $panel = select("marzban_panel", "*", "name_panel", $product['Location'], "select");
+    if (!$panel && $product['Location'] === '/all') {
+        $panel = select("marzban_panel", "*", "status", "activepanel", "select");
+    }
+    if ($panel && $panel['MethodUsername'] == $textbotlang['users']['customusername']) {
+        update("user", "Processing_value_four", (string)$product['id'], "id", $from_id);
+        sendmessage($from_id, $textbotlang['users']['selectusername'], $backuser, 'HTML');
+        step('reseller_buy_custom_username', $from_id);
+        return;
+    }
+    $result = startResellerProductPurchase($from_id, $product['id']);
+    if (($result['status'] ?? '') === 'need_payment') {
+        sendmessage($from_id, $textbotlang['users']['sell']['None-credit'], $step_payment, 'HTML');
+        step('get_step_payment', $from_id);
+        return;
+    }
+    if (($result['status'] ?? '') === 'created') {
+        sendmessage($from_id, $textbotlang['users']['buy']['reseller_purchase_started'], $keyboard, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    sendmessage($from_id, $textbotlang['users']['status']['error2'], $keyboard, 'HTML');
+    step('home', $from_id);
+    return;
+} elseif ($user['step'] == 'reseller_buy_custom_username') {
+    if (!isReseller($from_id)) {
+        step('home', $from_id);
+        return;
+    }
+    $productId = $user['Processing_value_four'];
+    $result = startResellerProductPurchase($from_id, $productId, $text);
+    if (($result['status'] ?? '') === 'invalid_username') {
+        sendmessage($from_id, $textbotlang['users']['invalidusername'], $backuser, 'HTML');
+        return;
+    }
+    if (($result['status'] ?? '') === 'need_payment') {
+        sendmessage($from_id, $textbotlang['users']['sell']['None-credit'], $step_payment, 'HTML');
+        step('get_step_payment', $from_id);
+        return;
+    }
+    if (($result['status'] ?? '') === 'created') {
+        sendmessage($from_id, $textbotlang['users']['buy']['reseller_purchase_started'], $keyboard, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    sendmessage($from_id, $textbotlang['users']['status']['error2'], $keyboard, 'HTML');
+    step('home', $from_id);
+    return;
+}
 if ($text == $datatextbot['text_sell'] || $datain == "buy" || $text == "/buy") {
+    if (isReseller($from_id)) {
+        $products = getActiveResellerProductsForUser($from_id);
+        if (count($products) == 0) {
+            sendmessage($from_id, $textbotlang['users']['buy']['reseller_no_products'], $keyboard, 'HTML');
+            return;
+        }
+        sendmessage($from_id, $textbotlang['users']['buy']['reseller_products_title'], buildResellerBuyKeyboard($from_id), 'HTML');
+        return;
+    }
     $locationproduct = select("marzban_panel", "*", "status", "activepanel", "count");
     if ($locationproduct == 0) {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['nullpanel'], null, 'HTML');
